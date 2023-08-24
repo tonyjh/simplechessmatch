@@ -28,6 +28,8 @@ int main(int argc, char* argv[])
       return 0;
    }
 
+   match_mgr.allocate_threads();
+
    cout << "loading engines...\n";
 
    if (match_mgr.load_all_engines() == 0)
@@ -61,6 +63,8 @@ MatchManager::MatchManager(void)
 {
    m_total_games_started = 0;
    m_engines_shut_down = false;
+   m_game_mgr = nullptr;
+   m_thread = nullptr;
 }
 
 MatchManager::~MatchManager(void)
@@ -75,8 +79,11 @@ void MatchManager::cleanup(void)
    shut_down_all_engines();
 
    for (uint i = 0; i < options.num_threads; i++)
-      if (m_game_mgr[i].m_thread.joinable())
-         m_game_mgr[i].m_thread.join();
+      if (m_thread[i].joinable())
+         m_thread[i].join();
+
+   delete[] m_game_mgr;
+   delete[] m_thread;
 
    this_thread::sleep_for(100ms);
 }
@@ -96,8 +103,8 @@ void MatchManager::main_loop(void)
             break;
          if (m_game_mgr[i].m_thread_running == 0)
          {
-            if (m_game_mgr[i].m_thread.joinable())
-               m_game_mgr[i].m_thread.join();
+            if (m_thread[i].joinable())
+               m_thread[i].join();
 
             if (!swap_sides)
                if (get_next_fen(fen) == 0)
@@ -108,7 +115,7 @@ void MatchManager::main_loop(void)
 
             // cout << "Starting thread " << i << ", swap: " << m_game_mgr[i].m_swap_sides << ", FEN: [" << m_game_mgr[i].m_fen << "]\n";
             m_game_mgr[i].m_thread_running = true;
-            m_game_mgr[i].m_thread = thread(&GameManager::game_runner, &m_game_mgr[i]);
+            m_thread[i] = thread(&GameManager::game_runner, &m_game_mgr[i]);
             m_total_games_started++;
          }
       }
@@ -142,6 +149,12 @@ uint MatchManager::num_games_in_progress(void)
       if (m_game_mgr[i].m_thread_running)
          games++;
    return games;
+}
+
+void MatchManager::allocate_threads(void)
+{
+   m_game_mgr = new GameManager[options.num_threads];
+   m_thread = new thread[options.num_threads];
 }
 
 int MatchManager::load_all_engines(void)
@@ -345,6 +358,7 @@ int parse_cmd_line_options(int argc, char* argv[])
    catch (...)
    {
       cerr << "error processing command line options\n";
+      return 0;
    }
 
    if (options.num_threads > MAX_THREADS)

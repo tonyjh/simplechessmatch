@@ -23,7 +23,7 @@ Engine::~Engine(void)
    {
       if (m_child_proc->running())
          m_child_proc->terminate();
-      delete(m_child_proc);
+      delete m_child_proc;
    }
 }
 
@@ -36,7 +36,7 @@ int Engine::load_engine(const string &eng_file_name, int ID, engine_number engin
    {
       if (m_child_proc->running())
          m_child_proc->terminate();
-      delete(m_child_proc);
+      delete m_child_proc;
    }
    try
    {

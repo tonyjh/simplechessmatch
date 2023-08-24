@@ -8,7 +8,6 @@ void output_PGN4(const string &fen, const string &movelist);
 class GameManager
 {
 public:
-   thread m_thread;
    Engine m_engine1;
    Engine m_engine2;
    uint m_engine1_wins;

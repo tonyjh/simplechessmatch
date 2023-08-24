@@ -17,10 +17,11 @@ int _kbhit(void);
 class MatchManager
 {
 public:
-   GameManager m_game_mgr[MAX_THREADS];
+   GameManager *m_game_mgr;
    fstream m_FENs_file;
 
 private:
+   thread *m_thread;
    uint m_total_games_started;
    bool m_engines_shut_down;
 
@@ -32,6 +33,7 @@ public:
    bool match_completed(void);
    bool new_game_can_start(void);
    uint num_games_in_progress(void);
+   void allocate_threads(void);
    int load_all_engines(void);
    void shut_down_all_engines(void);
    void set_engine_options(Engine *engine);
