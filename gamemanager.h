@@ -19,6 +19,7 @@ public:
    bool m_thread_running;
    bool m_swap_sides;
    bool m_error;
+   bool m_engine_disconnected;
    string m_fen;
 
 private:

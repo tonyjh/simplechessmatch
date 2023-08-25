@@ -15,6 +15,7 @@ GameManager::GameManager(void)
    m_swap_sides = false;
    m_loss_on_time = false;
    m_error = false;
+   m_engine_disconnected = false;
    m_num_moves = 0;
    m_white_clock_ms = chrono::milliseconds(0);
    m_black_clock_ms = chrono::milliseconds(0);
@@ -36,7 +37,9 @@ void GameManager::game_runner(void)
    result = run_engine_game(chrono::milliseconds(options.tc_ms), chrono::milliseconds(options.tc_inc_ms),
                             chrono::milliseconds(options.tc_fixed_time_move_ms));
 
-   if (result == ERROR_ILLEGAL_MOVE)
+   if (result == ERROR_ENGINE_DISCONNECTED)
+      m_engine_disconnected = true;
+   else if (result == ERROR_ILLEGAL_MOVE)
       m_illegal_move_games++;
    else if (((result == WHITE_WIN) && !m_swap_sides) || ((result == BLACK_WIN) && m_swap_sides))
    {

@@ -4,13 +4,19 @@
 #ifdef WIN32
 #include <conio.h>
 #else
+#include <signal.h>
+#endif
+#ifdef __linux__
 #include <termios.h>
 #endif
 
 #define MAX_THREADS 32
 
 int parse_cmd_line_options(int argc, char* argv[]);
-#ifndef WIN32
+#ifdef WIN32
+BOOL WINAPI ctrl_c_handler(DWORD fdwCtrlType);
+#else
+void ctrl_c_handler(int s);
 int _kbhit(void);
 #endif
 

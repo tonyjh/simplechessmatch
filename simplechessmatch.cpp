@@ -9,6 +9,16 @@ int main(int argc, char* argv[])
 {
    cout << "simplechessmatch\n";
 
+#ifdef WIN32
+   SetConsoleCtrlHandler(ctrl_c_handler, TRUE);
+#else
+   struct sigaction sig_handler;
+   sig_handler.sa_handler = ctrl_c_handler;
+   sigemptyset(&sig_handler.sa_mask);
+   sig_handler.sa_flags = 0;
+   sigaction(SIGINT, &sig_handler, NULL);
+#endif
+
    if (parse_cmd_line_options(argc, argv) == 0)
       return 0;
 
@@ -84,8 +94,6 @@ void MatchManager::cleanup(void)
 
    delete[] m_game_mgr;
    delete[] m_thread;
-
-   this_thread::sleep_for(100ms);
 }
 
 void MatchManager::main_loop(void)
@@ -93,7 +101,12 @@ void MatchManager::main_loop(void)
    string fen;
    bool swap_sides = false;
 
+#if defined(WIN32) || defined(__linux__)
+   // _kbhit is used to detect keypress
    cout << "\n***** Press any key to exit and terminate match *****\n\n";
+#else
+   cout << "\n***** Press Ctrl-C to exit and terminate match *****\n\n";
+#endif
 
    while (!match_completed())
    {
@@ -126,7 +139,7 @@ void MatchManager::main_loop(void)
          if (_kbhit())
             return;
          for (uint i = 0; i < options.num_threads; i++)
-            if (m_game_mgr[i].is_engine_unresponsive() || ((options.continue_on_error == 0) && m_game_mgr[i].m_error))
+            if (m_game_mgr[i].m_engine_disconnected || m_game_mgr[i].is_engine_unresponsive() || ((options.continue_on_error == 0) && m_game_mgr[i].m_error))
                return;
       }
    }
@@ -370,6 +383,7 @@ int parse_cmd_line_options(int argc, char* argv[])
 }
 
 #ifndef WIN32
+#ifdef __linux__
 // Linux _kbhit code from https://www.flipcode.com/archives/_kbhit_for_Linux.shtml (by Morgan McGuire)
 int _kbhit(void)
 {
@@ -390,5 +404,25 @@ int _kbhit(void)
    int bytesWaiting;
    ioctl(STDIN, FIONREAD, &bytesWaiting);
    return bytesWaiting;
+}
+#else
+// _kbhit not implemented
+int _kbhit(void)
+{
+   return 0;
+}
+#endif
+#endif
+
+#ifdef WIN32
+BOOL WINAPI ctrl_c_handler(DWORD fdwCtrlType)
+{
+   match_mgr.shut_down_all_engines();
+   return true;
+}
+#else
+void ctrl_c_handler(int s)
+{
+   match_mgr.shut_down_all_engines();
 }
 #endif
