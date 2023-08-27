@@ -374,6 +374,8 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("mem2",       po::value<uint>(&options.mem_size_2)->default_value(128), "second engine memory usage (MB)")
          ("custom1",    po::value<vector<string>>(&options.custom_commands_1), "first engine custom command. e.g. --custom1 \"setoption name Style value Risky\"")
          ("custom2",    po::value<vector<string>>(&options.custom_commands_2), "second engine custom command. Note: --custom1 and --custom2 can be used more than once in the command line.")
+         ("debug1",     "enable debug for first engine")
+         ("debug2",     "enable debug for second engine")
          ("tc",         po::value<uint>(&options.tc_ms)->default_value(10000), "time control base time (ms)")
          ("inc",        po::value<uint>(&options.tc_inc_ms)->default_value(100), "time control increment (ms)")
          ("fixed",      po::value<uint>(&options.tc_fixed_time_move_ms)->default_value(0), "time control fixed time per move (ms). This must be set to 0, unless engines should simply use a fixed amount of time per move.")
@@ -383,11 +385,11 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("maxmoves",   po::value<uint>(&options.max_moves)->default_value(1000), "maximum number of moves per game (total) before adjudicating draw")
          ("fens",       po::value<string>(&options.fens_filename), "file containing FENs for opening positions (one FEN per line)")
          ("variant",    po::value<string>(&options.variant), "variant name")
-         ("4pc",                    "enable 4 player chess (teams) mode")
-         ("continue",               "continue match if error occurs (e.g. illegal move)")
-         ("pmoves",                 "print out all moves")
-         ("pgn",        po::value<string>(&options.pgn_filename), "save games in PGN format to specified file name")
-         ("pgn4",       po::value<string>(&options.pgn4_filename), "save games in PGN4 format to specified file name")
+         ("4pc",        "enable 4 player chess (teams) mode")
+         ("continue",   "continue match if error occurs (e.g. illegal move)")
+         ("pmoves",     "print out all moves")
+         ("pgn",        po::value<string>(&options.pgn_filename), "save games in PGN format to specified file name\n(if file exists it will be overwritten)")
+         ("pgn4",       po::value<string>(&options.pgn4_filename), "save games in PGN4 format to specified file name\n(if file exists it will be overwritten)")
          ;
 
       po::variables_map var_map;
@@ -402,6 +404,8 @@ int parse_cmd_line_options(int argc, char* argv[])
 
       options.uci_1 = (var_map.count("x1") == 0);
       options.uci_2 = (var_map.count("x2") == 0);
+      options.debug_1 = (var_map.count("debug1") != 0);
+      options.debug_2 = (var_map.count("debug2") != 0);
       options.continue_on_error = (var_map.count("continue") != 0);
       options.print_moves = (var_map.count("pmoves") != 0);
       options.fourplayerchess = (var_map.count("4pc") != 0);

@@ -39,6 +39,8 @@ g++ -O3 engine.cpp gamemanager.cpp simplechessmatch.cpp -lboost_filesystem -lboo
   --custom2 arg          second engine custom command. Note: --custom1 and
                          --custom2 can be used more than once in the command
                          line.
+  --debug1               enable debug for first engine
+  --debug2               enable debug for second engine
   --tc arg (=10000)      time control base time (ms)
   --inc arg (=100)       time control increment (ms)
   --fixed arg (=0)       time control fixed time per move (ms). This must be
@@ -57,5 +59,7 @@ g++ -O3 engine.cpp gamemanager.cpp simplechessmatch.cpp -lboost_filesystem -lboo
   --continue             continue match if error occurs (e.g. illegal move)
   --pmoves               print out all moves
   --pgn arg              save games in PGN format to specified file name
+                         (if file exists it will be overwritten)
   --pgn4 arg             save games in PGN4 format to specified file name
+                         (if file exists it will be overwritten)
 ```

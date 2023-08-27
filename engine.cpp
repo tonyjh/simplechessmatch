@@ -2,6 +2,8 @@
 
 namespace bp = boost::process;
 
+extern struct options_info options;
+
 // Engine constructor
 Engine::Engine(void)
 {
@@ -13,6 +15,10 @@ Engine::Engine(void)
    m_resigned = false;
    m_is_ready = false;
    m_quit_cmd_sent = false;
+   m_xb_feature_ping = false;
+   m_xb_feature_colors = false;
+   m_xb_features_done = false;
+   m_debug = false;
    m_score = 0;
    m_line.reserve(200);
 }
@@ -52,6 +58,8 @@ int Engine::load_engine(const string &eng_file_name, int ID, engine_number engin
    m_number = engine_num;
    m_uci = uci;
 
+   m_debug = (m_number == FIRST) ? options.debug_1 : options.debug_2;
+
    if (m_uci)
       send_engine_cmd("uci");
    else
@@ -60,10 +68,40 @@ int Engine::load_engine(const string &eng_file_name, int ID, engine_number engin
    return 1;
 }
 
+int Engine::get_features(void)
+{
+   if (m_xb_features_done)
+      return 1; // only need to get features once
+
+   send_engine_cmd("protover 2");
+   m_is_ready = false;
+
+   while (1)
+   {
+      if (readline() == 0)
+         return 0;
+
+      if (m_line.find("colors=1", 0) != string::npos)
+         m_xb_feature_colors = true;
+      if (m_line.find("ping=1", 0) != string::npos)
+         m_xb_feature_ping = true;
+
+      // An xboard engine should respond to the "protover 2" command with "feature done=1", or an error message like "Error (unknown command): protover".
+      if ((m_line.find("done=1", 0) != string::npos) || (m_line.find("protover", 0) != string::npos))
+      {
+         m_xb_features_done = true;
+         m_is_ready = true;
+         return 1;
+      }
+   }
+}
+
 void Engine::send_engine_cmd(const string &cmd)
 {
    if (is_running())
    {
+      if (m_debug)
+         cout << "TO ENGINE " << m_ID << ": " << cmd << "\n";
       m_in_stream << cmd << "\n";
       m_in_stream.flush();
    }
@@ -80,10 +118,16 @@ int Engine::readline(void)
    // note: getline is blocking.
    getline(m_out_stream, m_line);
    if (m_out_stream.eof())
+   {
+      if (m_debug)
+         cout << "ENGINE " << m_ID << " DISCONNECTED\n";
       return 0;
+   }
    rstrip(m_line);
    if (m_uci)
       lstrip(m_line);
+   if (m_debug)
+      cout << "FROM ENGINE " << m_ID << ": " << m_line << "\n";
    return 1;
 }
 
@@ -92,8 +136,10 @@ int Engine::wait_for_ready(bool check_output)
    m_is_ready = false;
    if (m_uci)
       send_engine_cmd("isready");
-   else
+   else if (m_xb_feature_ping)
       send_engine_cmd("ping 1");
+   else
+      send_engine_cmd("protover 2");
 
    while (1)
    {
@@ -107,9 +153,17 @@ int Engine::wait_for_ready(bool check_output)
             return 1;
          }
       }
-      else
+      else if (m_xb_feature_ping)
       {
          if (m_line.rfind("pong 1", 0) == 0)
+         {
+            m_is_ready = true;
+            return 1;
+         }
+      }
+      else
+      {
+         if ((m_line.find("done=1", 0) != string::npos) || (m_line.find("protover", 0) != string::npos))
          {
             m_is_ready = true;
             return 1;
@@ -120,7 +174,7 @@ int Engine::wait_for_ready(bool check_output)
    }
 }
 
-int Engine::engine_new_game_setup(player_color color, int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, const string &fen, const string &variant)
+int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, const string &fen, const string &variant)
 {
    m_result = UNFINISHED;
    m_resigned = false;
@@ -136,13 +190,18 @@ int Engine::engine_new_game_setup(player_color color, int64_t start_time_ms, int
       if (!variant.empty())
          send_engine_cmd("setoption name UCI_Variant value " + variant);
 
-      if (!fen.empty())
-         send_engine_cmd("position fen " + fen);
-      else
-         send_engine_cmd("position startpos");
+      if (turn == color)
+      {
+         if (!fen.empty())
+            send_engine_cmd("position fen " + fen);
+         else
+            send_engine_cmd("position startpos");
+      }
    }
    else
    {
+      if (!get_features())
+         return 0;
       send_engine_cmd("new");
       if (!wait_for_ready(false))
          return 0;
@@ -152,11 +211,8 @@ int Engine::engine_new_game_setup(player_color color, int64_t start_time_ms, int
 
       if (!fen.empty())
          send_engine_cmd("setboard " + fen);
-   }
 
-   if (!m_uci)
-   {
-      send_engine_cmd("nopost");
+      send_engine_cmd("post");
       if (fixed_time_ms)
       {
          if (fixed_time_ms >= 1000)
@@ -177,6 +233,13 @@ int Engine::engine_new_game_setup(player_color color, int64_t start_time_ms, int
          send_engine_cmd(cmd);
          send_engine_cmd("time " + to_string(start_time_ms / 10));
          send_engine_cmd("otim " + to_string(start_time_ms / 10));
+      }
+      if (m_xb_feature_colors)
+      {
+         if ((m_color == BLACK) && (turn == WHITE))
+            send_engine_cmd("white");
+         if ((m_color == WHITE) && (turn == BLACK))
+            send_engine_cmd("black");
       }
    }
 
@@ -317,6 +380,19 @@ void Engine::check_engine_output(void)
          m_result = DRAW;
       else if (m_line.rfind("offer draw", 0) == 0)
          m_result = DRAW;
+      else if (isdigit(m_line[0]))
+      {
+         int ply, score, time, nodes;
+         stringstream ss(m_line);
+         if (ss >> ply >> score >> time >> nodes)
+         {
+            m_score = score;
+            if (m_score > (mate_score + 999))
+               m_score = (mate_score + 999);
+            if (m_score < (mate_score_neg - 999))
+               m_score = mate_score_neg - 999;
+         }
+      }
    }
 }
 
@@ -437,6 +513,18 @@ void Engine::update_game_result(void)
          m_result = (m_color == WHITE) ? BLACK_WIN : WHITE_WIN;
       // else, leave m_result set to NO_LEGAL_MOVES. It could be either stalemate or checkmate.
    }
+}
+
+string Engine::get_eval(void)
+{
+   string s;
+   if (m_score > mate_score)
+      s = "mate in " + to_string(m_score - mate_score);
+   else if (m_score <= mate_score_neg)
+      s = "mated in " + to_string(mate_score_neg - m_score);
+   else
+      s = to_string(m_score);
+   return s;
 }
 
 void rstrip(string &s)

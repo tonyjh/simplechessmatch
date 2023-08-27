@@ -37,15 +37,17 @@ public:
    ~MatchManager(void);
    void cleanup(void);
    void main_loop(void);
-   bool match_completed(void);
-   bool new_game_can_start(void);
-   uint num_games_in_progress(void);
    int initialize(void);
    int load_all_engines(void);
-   void shut_down_all_engines(void);
    void set_engine_options(Engine *engine);
    void send_engine_custom_commands(Engine *engine);
    void print_results(void);
-   int get_next_fen(string &fen);
    void save_pgn(void);
+   void shut_down_all_engines(void);
+
+private:
+   bool match_completed(void);
+   bool new_game_can_start(void);
+   uint num_games_in_progress(void);
+   int get_next_fen(string &fen);
 };

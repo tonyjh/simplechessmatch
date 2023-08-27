@@ -96,13 +96,13 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
 
    m_turn = get_color_to_move_from_fen(m_fen);
 
-   if (white_engine->engine_new_game_setup(WHITE, start_time_ms.count(), increment_ms.count(), fixed_time_ms.count(), m_fen, options.variant) == 0)
+   if (white_engine->engine_new_game_setup(WHITE, m_turn, start_time_ms.count(), increment_ms.count(), fixed_time_ms.count(), m_fen, options.variant) == 0)
    {
       if (!white_engine->m_quit_cmd_sent)
          cout << "Error: " << white_engine->m_name << " could not start a new game.\n";
       return ERROR_ENGINE_DISCONNECTED;
    }
-   if (black_engine->engine_new_game_setup(BLACK, start_time_ms.count(), increment_ms.count(), fixed_time_ms.count(), m_fen, options.variant) == 0)
+   if (black_engine->engine_new_game_setup(BLACK, m_turn, start_time_ms.count(), increment_ms.count(), fixed_time_ms.count(), m_fen, options.variant) == 0)
    {
       if (!black_engine->m_quit_cmd_sent)
          cout << "Error: " << black_engine->m_name << " could not start a new game.\n";
@@ -143,7 +143,8 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          m_timestamp = chrono::steady_clock::now();
          m_num_moves++;
          if (options.print_moves)
-            cout << "white moved: " << white_engine->m_move << ",   elapsed: " << elapsed_time_ms.count() << " ms,   white clock: " << m_white_clock_ms.count() << " ms\n";
+            cout << "white moved: " << white_engine->m_move << ",   elapsed: " << elapsed_time_ms.count() << " ms,   white clock: "
+                 << m_white_clock_ms.count() << " ms,  eval: " << white_engine->get_eval() << "\n";
       }
       else
       {
@@ -171,7 +172,8 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          m_timestamp = chrono::steady_clock::now();
          m_num_moves++;
          if (options.print_moves)
-            cout << "black moved: " << black_engine->m_move << ",   elapsed: " << elapsed_time_ms.count() << " ms,   black clock: " << m_black_clock_ms.count() << " ms\n";
+            cout << "black moved: " << black_engine->m_move << ",   elapsed: " << elapsed_time_ms.count() << " ms,   black clock: "
+                 << m_black_clock_ms.count() << " ms,  eval: " << black_engine->get_eval() << "\n";
       }
 
       m_turn = (m_turn == WHITE) ? BLACK : WHITE;
@@ -202,7 +204,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    // if (options.debug)
    // {
       // cout << "Game result: " << result << ", " << white_engine->get_game_result() << ", " << black_engine->get_game_result() << "\n";
-      // cout << "engine evals: white = " << white_engine->m_score << ", black = " << black_engine->m_score << "\n";
+      // cout << "engine evals: white = " << white_engine->get_eval() << ", black = " << black_engine->get_eval() << "\n";
    // }
 
    return result;
@@ -219,18 +221,18 @@ bool GameManager::is_engine_unresponsive(void)
       if ((elapsed_time_ms > 5s) && (!m_engine1.m_is_ready || !m_engine2.m_is_ready))
       {
          if (!m_engine1.m_is_ready)
-            cout << "Error: " << m_engine1.m_name << " is not ready after 5 seconds.\n";
+            cout << "Error: " << m_engine1.m_name << " (" << m_engine1.m_ID << ") is not ready after 5 seconds.\n";
          else
-            cout << "Error: " << m_engine2.m_name << " is not ready after 5 seconds.\n";
+            cout << "Error: " << m_engine2.m_name << " (" << m_engine2.m_ID << ") is not ready after 5 seconds.\n";
          return true;
       }
 
       if ((clock_ms - elapsed_time_ms) < -10s)
       {
          if (((m_turn == WHITE) && !m_swap_sides) || ((m_turn == BLACK) && m_swap_sides))
-            cout << "Error: " << m_engine1.m_name << " is not moving (clock < -10s).\n";
+            cout << "Error: " << m_engine1.m_name << " (" << m_engine1.m_ID << ") is not moving (clock < -10s).\n";
          else
-            cout << "Error: " << m_engine2.m_name << " is not moving (clock < -10s).\n";
+            cout << "Error: " << m_engine2.m_name << " (" << m_engine2.m_ID << ") is not moving (clock < -10s).\n";
          return true;
       }
    }
@@ -318,7 +320,7 @@ void GameManager::store_pgn(const string &movelist, game_result result, const st
 
    if (!options.variant.empty())
       temp_pgn << "[Variant \"" << options.variant << "\"]\n";
-   int64_t base_time_seconds = start_time_ms.count() / 1000;
+   int64_t base_time_seconds = fixed_time_ms.count() ? 0 : (start_time_ms.count() / 1000);
    int64_t inc_time_seconds = fixed_time_ms.count() ? (fixed_time_ms.count() / 1000) : (increment_ms.count() / 1000);
    temp_pgn << "[TimeControl \"" << base_time_seconds << "+" << inc_time_seconds << "\"]\n";
    temp_pgn << "[White \"" << white_name << "\"]\n";
@@ -375,7 +377,7 @@ void GameManager::store_pgn4(const string &movelist, game_result result, const s
 
    temp_pgn << "[Variant \"Teams\"]\n";
    temp_pgn << "[RuleVariants \"EnPassant\"]\n";
-   int64_t base_time_minutes = start_time_ms.count() / 60000;
+   int64_t base_time_minutes = fixed_time_ms.count() ? 0 : (start_time_ms.count() / 60000);
    int64_t inc_time_seconds = fixed_time_ms.count() ? (fixed_time_ms.count() / 1000) : (increment_ms.count() / 1000);
    temp_pgn << "[TimeControl \"" << base_time_minutes << "+" << inc_time_seconds << "\"]\n";
    temp_pgn << "[Red \"" << white_name << "\"]\n";
