@@ -24,12 +24,13 @@ class MatchManager
 {
 public:
    GameManager *m_game_mgr;
-   fstream m_FENs_file;
 
 private:
    thread *m_thread;
    uint m_total_games_started;
    bool m_engines_shut_down;
+   fstream m_FENs_file;
+   fstream m_pgn_file;
 
 public:
    MatchManager(void);
@@ -39,11 +40,12 @@ public:
    bool match_completed(void);
    bool new_game_can_start(void);
    uint num_games_in_progress(void);
-   void allocate_threads(void);
+   int initialize(void);
    int load_all_engines(void);
    void shut_down_all_engines(void);
    void set_engine_options(Engine *engine);
    void send_engine_custom_commands(Engine *engine);
    void print_results(void);
    int get_next_fen(string &fen);
+   void save_pgn(void);
 };

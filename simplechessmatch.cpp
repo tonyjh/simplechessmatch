@@ -22,23 +22,8 @@ int main(int argc, char* argv[])
    if (parse_cmd_line_options(argc, argv) == 0)
       return 0;
 
-   if (!options.fens_filename.empty())
-   {
-      match_mgr.m_FENs_file.open(options.fens_filename, ios::in);
-      if (!match_mgr.m_FENs_file.is_open())
-      {
-         cout << "Error: could not open file " << options.fens_filename << "\n";
-         return 0;
-      }
-   }
-
-   if (options.engine_file_name_1.empty() || options.engine_file_name_2.empty())
-   {
-      cout << "Error: must specify two engines\n";
+   if (match_mgr.initialize() == 0)
       return 0;
-   }
-
-   match_mgr.allocate_threads();
 
    cout << "loading engines...\n";
 
@@ -61,6 +46,7 @@ int main(int argc, char* argv[])
    match_mgr.main_loop();
 
    match_mgr.print_results();
+   match_mgr.save_pgn();
 
    match_mgr.cleanup();
 
@@ -85,6 +71,8 @@ void MatchManager::cleanup(void)
 {
    if (m_FENs_file.is_open())
       m_FENs_file.close();
+   if (m_pgn_file.is_open())
+      m_pgn_file.close();
 
    shut_down_all_engines();
 
@@ -136,10 +124,11 @@ void MatchManager::main_loop(void)
       {
          this_thread::sleep_for(200ms);
          print_results();
+         save_pgn();
          if (_kbhit())
             return;
          for (uint i = 0; i < options.num_threads; i++)
-            if (m_game_mgr[i].m_engine_disconnected || m_game_mgr[i].is_engine_unresponsive() || ((options.continue_on_error == 0) && m_game_mgr[i].m_error))
+            if (m_game_mgr[i].m_engine_disconnected || m_game_mgr[i].is_engine_unresponsive() || (!options.continue_on_error && m_game_mgr[i].m_error))
                return;
       }
    }
@@ -164,10 +153,46 @@ uint MatchManager::num_games_in_progress(void)
    return games;
 }
 
-void MatchManager::allocate_threads(void)
+int MatchManager::initialize(void)
 {
+   if (options.engine_file_name_1.empty() || options.engine_file_name_2.empty())
+   {
+      cout << "Error: must specify two engines\n";
+      return 0;
+   }
+
+   if (!options.fens_filename.empty())
+   {
+      m_FENs_file.open(options.fens_filename, ios::in);
+      if (!m_FENs_file.is_open())
+      {
+         cout << "Error: could not open FEN file " << options.fens_filename << "\n";
+         return 0;
+      }
+   }
+
+   if (!options.pgn_filename.empty() && !options.pgn4_filename.empty())
+   {
+      cout << "Error: must not choose both PGN and PGN4\n";
+      return 0;
+   }
+
+   if (!options.pgn_filename.empty() || !options.pgn4_filename.empty())
+   {
+      options.pgn4_format = options.pgn_filename.empty();
+      string filename = (options.pgn4_format) ? options.pgn4_filename : options.pgn_filename;
+      m_pgn_file.open(filename, ios::out);
+      if (!m_pgn_file.is_open())
+      {
+         cout << "Error: could not open PGN file " << filename << "\n";
+         return 0;
+      }
+   }
+
    m_game_mgr = new GameManager[options.num_threads];
    m_thread = new thread[options.num_threads];
+
+   return 1;
 }
 
 int MatchManager::load_all_engines(void)
@@ -317,6 +342,21 @@ int MatchManager::get_next_fen(string &fen)
    return 1;
 }
 
+void MatchManager::save_pgn(void)
+{
+   if (!m_pgn_file.is_open())
+      return;
+
+   for (uint i = 0; i < options.num_threads; i++)
+   {
+      if (m_game_mgr[i].m_pgn_valid.load(memory_order_acquire))
+      {
+         m_game_mgr[i].m_pgn_valid = false;
+         m_pgn_file << m_game_mgr[i].m_pgn;
+      }
+   }
+}
+
 int parse_cmd_line_options(int argc, char* argv[])
 {
    try
@@ -345,7 +385,10 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("variant",    po::value<string>(&options.variant), "variant name")
          ("4pc",                    "enable 4 player chess (teams) mode")
          ("continue",               "continue match if error occurs (e.g. illegal move)")
-         ("pmoves",                 "print out all moves");
+         ("pmoves",                 "print out all moves")
+         ("pgn",        po::value<string>(&options.pgn_filename), "save games in PGN format to specified file name")
+         ("pgn4",       po::value<string>(&options.pgn4_filename), "save games in PGN4 format to specified file name")
+         ;
 
       po::variables_map var_map;
       po::store(po::parse_command_line(argc, argv, desc), var_map);

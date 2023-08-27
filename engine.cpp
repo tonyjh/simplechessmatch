@@ -10,6 +10,7 @@ Engine::Engine(void)
    m_number = FIRST;
    m_color = BLACK;
    m_result = UNFINISHED;
+   m_resigned = false;
    m_is_ready = false;
    m_quit_cmd_sent = false;
    m_score = 0;
@@ -122,6 +123,7 @@ int Engine::wait_for_ready(bool check_output)
 int Engine::engine_new_game_setup(player_color color, int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, const string &fen, const string &variant)
 {
    m_result = UNFINISHED;
+   m_resigned = false;
    m_color = color;
    m_score = 0;
 
@@ -303,7 +305,10 @@ void Engine::check_engine_output(void)
          m_result = ERROR_INVALID_POSITION;
       }
       else if (m_line.rfind("resign", 0) == 0)
+      {
          m_result = (m_color == WHITE) ? BLACK_WIN : WHITE_WIN;
+         m_resigned = true;
+      }
       else if (m_line.rfind("1-0", 0) == 0)
          m_result = WHITE_WIN;
       else if (m_line.rfind("0-1", 0) == 0)

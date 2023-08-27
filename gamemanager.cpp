@@ -19,6 +19,7 @@ GameManager::GameManager(void)
    m_num_moves = 0;
    m_white_clock_ms = chrono::milliseconds(0);
    m_black_clock_ms = chrono::milliseconds(0);
+   m_pgn_valid = false;
 }
 
 GameManager::~GameManager(void)
@@ -190,11 +191,12 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    white_engine->send_result_to_engine(result);
    black_engine->send_result_to_engine(result);
 
+   store_pgn(movelist, result, white_engine->m_file_name, black_engine->m_file_name, start_time_ms, increment_ms, fixed_time_ms);
+
    if (result == ERROR_ILLEGAL_MOVE)
    {
       cout << "\n" << m_fen << "\n" << movelist << "\n";
-      if (options.fourplayerchess)
-         output_PGN4(m_fen, movelist);
+      cout << "\n" << m_pgn << "\n";
    }
 
    // if (options.debug)
@@ -301,6 +303,109 @@ game_result GameManager::determine_game_result(Engine *white_engine, Engine *bla
    return result;
 }
 
+void GameManager::store_pgn(const string &movelist, game_result result, const string &white_name, const string &black_name,
+                            chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms)
+{
+   if (options.pgn4_format)
+   {
+      store_pgn4(movelist, result, white_name, black_name, start_time_ms, increment_ms, fixed_time_ms);
+      return;
+   }
+
+   stringstream temp_pgn;
+   string result_str;
+   vector<string> moves = get_tokens(movelist);
+
+   if (!options.variant.empty())
+      temp_pgn << "[Variant \"" << options.variant << "\"]\n";
+   int64_t base_time_seconds = start_time_ms.count() / 1000;
+   int64_t inc_time_seconds = fixed_time_ms.count() ? (fixed_time_ms.count() / 1000) : (increment_ms.count() / 1000);
+   temp_pgn << "[TimeControl \"" << base_time_seconds << "+" << inc_time_seconds << "\"]\n";
+   temp_pgn << "[White \"" << white_name << "\"]\n";
+   temp_pgn << "[Black \"" << black_name << "\"]\n";
+
+   if (result == WHITE_WIN)
+      result_str = "1-0";
+   else if (result == BLACK_WIN)
+      result_str = "0-1";
+   else if (result == DRAW)
+      result_str = "1/2-1/2";
+   else
+      result_str = "*";
+
+   temp_pgn << "[Result \"" << result_str << "\"]\n";
+
+   if (!m_fen.empty())
+   {
+      temp_pgn << "[SetUp \"1\"]\n";
+      temp_pgn << "[FEN \"" << m_fen << "\"]\n";
+   }
+   for (int i = 0; i < moves.size(); i++)
+   {
+      if ((i % 10) == 0)
+         temp_pgn << "\n" << ((i / 2) + 1) << ". " << moves[i];
+      else if ((i % 2) == 0)
+         temp_pgn << " " << ((i / 2) + 1) << ". " << moves[i];
+      else
+         temp_pgn << " " << moves[i];
+   }
+   temp_pgn << " " << result_str << "\n\n";
+
+   m_pgn = temp_pgn.str();
+   m_pgn_valid.store(true, memory_order_release);
+}
+
+void GameManager::store_pgn4(const string &movelist, game_result result, const string &white_name, const string &black_name,
+                             chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms)
+{
+   stringstream temp_pgn;
+   vector<string> moves = get_tokens(movelist);
+
+   if ((result == WHITE_WIN) || (result == BLACK_WIN))
+   {
+      if (m_engine1.m_resigned || m_engine2.m_resigned)
+         moves.push_back("R"); // resignation
+      else if (m_loss_on_time)
+         moves.push_back("T"); // loss on time
+      else
+         moves.push_back("#"); // checkmate
+   }
+   else if (result == DRAW)
+      moves.push_back("S"); // S should mean stalemate. Currently using S for any type of draw.
+
+   temp_pgn << "[Variant \"Teams\"]\n";
+   temp_pgn << "[RuleVariants \"EnPassant\"]\n";
+   int64_t base_time_minutes = start_time_ms.count() / 60000;
+   int64_t inc_time_seconds = fixed_time_ms.count() ? (fixed_time_ms.count() / 1000) : (increment_ms.count() / 1000);
+   temp_pgn << "[TimeControl \"" << base_time_minutes << "+" << inc_time_seconds << "\"]\n";
+   temp_pgn << "[Red \"" << white_name << "\"]\n";
+   temp_pgn << "[Blue \"" << black_name << "\"]\n";
+
+   if (result == WHITE_WIN)
+      temp_pgn << "[Result \"1-0\"]\n";
+   else if (result == BLACK_WIN)
+      temp_pgn << "[Result \"0-1\"]\n";
+   else if (result == DRAW)
+      temp_pgn << "[Result \"1/2-1/2\"]\n";
+   else
+      temp_pgn << "[Result \"*\"]\n";
+
+   if (!m_fen.empty())
+      temp_pgn << "[StartFen4 \"" << m_fen << "\"]\n";
+   for (int i = 0; i < moves.size(); i++)
+   {
+      convert_move_to_PGN4_format(moves[i]);
+      if ((i % 4) == 0)
+         temp_pgn << "\n" << ((i / 4) + 1) << ". " << moves[i];
+      else
+         temp_pgn << " .. " << moves[i];
+   }
+   temp_pgn << "\n\n";
+
+   m_pgn = temp_pgn.str();
+   m_pgn_valid.store(true, memory_order_release);
+}
+
 player_color get_color_to_move_from_fen(string fen)
 {
    if (fen.empty())
@@ -326,10 +431,12 @@ player_color get_color_to_move_from_fen(string fen)
    return WHITE;
 }
 
-// Example: convert "h2h3" to "h2-h3"
-void convert_move_to_dash_format(string &move)
+// PGN4 / chess.com format uses dashes, e.g. "h2-h3" instead of "h2h3"
+// PGN4 / chess.com format uses equals sign followed by capital letter for promotion, e.g. "j5-j4=Q" instead of "j5j4q"
+void convert_move_to_PGN4_format(string &move)
 {
-   int i = 0;
+   // first, insert dash character if needed
+   size_t i = 0;
    if (move.find("-") != string::npos)
       return;
    while (isalpha(move[i]))
@@ -338,21 +445,12 @@ void convert_move_to_dash_format(string &move)
       i++;
    if ((i == 2) || (i == 3))
       move.insert(i, "-");
-}
 
-void output_PGN4(const string &fen, const string &movelist)
-{
-   vector<string> moves = get_tokens(movelist);
-   cout << "\n[StartFen4 \"" << fen << "\"]\n";
-   for (int i = 0; i < moves.size(); i++)
+   // second, check for promotion move
+   i = move.length() - 1;
+   if (isalpha(move[i]) && move[i] != 'O') // O would indicate castling: O-O or O-O-O
    {
-      convert_move_to_dash_format(moves[i]);
-      if ((i % 4) == 0)
-         cout << ((i / 4) + 1) << ". " << moves[i] << " .. ";
-      else if ((i % 4) == 3)
-         cout << moves[i] << "\n";
-      else
-         cout << moves[i] << " .. ";
+      move.insert(i, "=");
+      move[i + 1] = toupper(move[i + 1]);
    }
-   cout << "\n\n";
 }

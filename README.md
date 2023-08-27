@@ -56,4 +56,6 @@ g++ -O3 engine.cpp gamemanager.cpp simplechessmatch.cpp -lboost_filesystem -lboo
   --4pc                  enable 4 player chess (teams) mode
   --continue             continue match if error occurs (e.g. illegal move)
   --pmoves               print out all moves
+  --pgn arg              save games in PGN format to specified file name
+  --pgn4 arg             save games in PGN4 format to specified file name
 ```

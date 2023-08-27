@@ -49,6 +49,7 @@ public:
    string m_move;
    bool m_is_ready;
    bool m_quit_cmd_sent;
+   bool m_resigned;
 
 private:
    bp::child *m_child_proc;
