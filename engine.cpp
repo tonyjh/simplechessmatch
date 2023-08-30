@@ -18,6 +18,8 @@ Engine::Engine(void)
    m_xb_feature_ping = false;
    m_xb_feature_colors = false;
    m_xb_features_done = false;
+   m_xb_feature_setboard = true;
+   m_xb_force_mode = false;
    m_debug = false;
    m_score = 0;
    m_line.reserve(200);
@@ -85,10 +87,20 @@ int Engine::get_features(void)
          m_xb_feature_colors = true;
       if (m_line.find("ping=1", 0) != string::npos)
          m_xb_feature_ping = true;
+      if (m_line.find("setboard=0", 0) != string::npos)
+         m_xb_feature_setboard = false;
 
       // An xboard engine should respond to the "protover 2" command with "feature done=1", or an error message like "Error (unknown command): protover".
-      if ((m_line.find("done=1", 0) != string::npos) || (m_line.find("protover", 0) != string::npos))
+      if (m_line.find("done=1", 0) != string::npos)
       {
+         m_xb_features_done = true;
+         m_is_ready = true;
+         return 1;
+      }
+      else if (m_line.find("protover", 0) != string::npos)
+      {
+         // if the engine doesn't support "protover", assume it doesn't support "setboard" either.
+         m_xb_feature_setboard = false;
          m_xb_features_done = true;
          m_is_ready = true;
          return 1;
@@ -210,7 +222,12 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
          send_engine_cmd("variant " + variant);
 
       if (!fen.empty())
-         send_engine_cmd("setboard " + fen);
+      {
+         if (m_xb_feature_setboard)
+            send_engine_cmd("setboard " + fen);
+         else
+            xb_edit_board(fen);
+      }
 
       send_engine_cmd("post");
       if (fixed_time_ms)
@@ -423,6 +440,11 @@ void Engine::send_move_and_clocks_to_engine(const string &move, const string &st
          send_engine_cmd("otim " + to_string(opp_clock_ms / 10));
       }
       send_engine_cmd(move);
+      if (m_xb_force_mode)
+      {
+         send_engine_cmd("go");
+         m_xb_force_mode = false;
+      }
    }
 }
 
@@ -527,6 +549,69 @@ string Engine::get_eval(void)
    return s;
 }
 
+// This function is only for old xboard engines that support the "edit" command instead of the "setboard" command.
+// This function will only work for normal chess.
+void Engine::xb_edit_board(const string &fen)
+{
+   uint s = 0, fen_index = 0;
+   uint empty;
+   size_t len = fen.length();
+   char file, rank;
+   stringstream cmd;
+   player_color color = WHITE;
+
+   const string white_pieces = "PNBRQK";
+   const string black_pieces = "pnbrqk";
+   const char *fen_buf = fen.c_str();
+
+   if (get_color_to_move_from_fen(fen) == BLACK)
+   {
+      send_engine_cmd("force");
+      send_engine_cmd("a2a3");
+      m_xb_force_mode = true;
+   }
+
+   send_engine_cmd("edit");
+   send_engine_cmd("#");
+   while (s < 64)
+   {
+      if (white_pieces.find(fen_buf[fen_index]) != string::npos)
+      {
+         file = 'a' + (s % 8);
+         rank = '1' + 7 - (s / 8);
+         if (color != WHITE)
+            send_engine_cmd("c");
+         color = WHITE;
+         cmd.str("");
+         cmd << fen_buf[fen_index] << file << rank;
+         send_engine_cmd(cmd.str());
+         s++;
+      }
+      else if (black_pieces.find(fen_buf[fen_index]) != string::npos)
+      {
+         file = 'a' + (s % 8);
+         rank = '1' + 7 - (s / 8);
+         if (color != BLACK)
+            send_engine_cmd("c");
+         color = BLACK;
+         cmd.str("");
+         cmd << (char)toupper(fen_buf[fen_index]) << file << rank;
+         send_engine_cmd(cmd.str());
+         s++;
+      }
+      else if ((fen_buf[fen_index] >= '1') && (fen_buf[fen_index] <= '8'))
+      {
+         empty = atoi(&fen_buf[fen_index]);
+         if (empty > 8)
+            break; // invalid FEN
+         s += empty;
+      }
+      if (++fen_index >= len)
+         break;
+   }
+   send_engine_cmd(".");
+}
+
 void rstrip(string &s)
 {
    // strip spaces/tabs/newlines/etc.
@@ -567,4 +652,29 @@ vector<string> get_tokens(const string &s)
    }
 
    return tokens;
+}
+
+player_color get_color_to_move_from_fen(const string &fen)
+{
+   if (fen.empty())
+      return WHITE;
+
+   // Chess.com 4 player chess (FEN4), RY vs BG teams:
+   if (fen.rfind("R-", 0) == 0)
+      return WHITE;
+   if (fen.rfind("B-", 0) == 0)
+      return BLACK;
+   if (fen.rfind("Y-", 0) == 0)
+      return WHITE;
+   if (fen.rfind("G-", 0) == 0)
+      return BLACK;
+
+   // Normal FEN:
+   if (fen.find(" w ") != string::npos)
+      return WHITE;
+   if (fen.find(" b ") != string::npos)
+      return BLACK;
+
+   cout << "Warning: couldn't get color to move from FEN: " << fen << "\n";
+   return WHITE;
 }

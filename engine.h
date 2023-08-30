@@ -39,6 +39,7 @@ void rstrip(string &s);
 void lstrip(string &s);
 string get_first_token(const string &s, size_t pos);
 vector<string> get_tokens(const string &s);
+player_color get_color_to_move_from_fen(const string &fen);
 
 class Engine
 {
@@ -64,6 +65,8 @@ private:
    bool m_xb_feature_ping;          // xboard only
    bool m_xb_feature_colors;        // xboard only
    bool m_xb_features_done;         // xboard only
+   bool m_xb_feature_setboard;      // xboard only
+   bool m_xb_force_mode;            // xboard only
    bool m_debug;
 
    const int mate_score = 100000;
@@ -92,6 +95,7 @@ public:
    game_result get_game_result(void);
    void update_game_result(void);
    string get_eval(void);
+   void xb_edit_board(const string &fen);
 
 private:
    int readline(void);

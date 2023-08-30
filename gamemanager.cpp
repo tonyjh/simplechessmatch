@@ -408,31 +408,6 @@ void GameManager::store_pgn4(const string &movelist, game_result result, const s
    m_pgn_valid.store(true, memory_order_release);
 }
 
-player_color get_color_to_move_from_fen(string fen)
-{
-   if (fen.empty())
-      return WHITE;
-
-   // Chess.com 4 player chess (FEN4), RY vs BG teams:
-   if (fen.rfind("R-", 0) == 0)
-      return WHITE;
-   if (fen.rfind("B-", 0) == 0)
-      return BLACK;
-   if (fen.rfind("Y-", 0) == 0)
-      return WHITE;
-   if (fen.rfind("G-", 0) == 0)
-      return BLACK;
-
-   // Normal FEN:
-   if (fen.find(" w ") != string::npos)
-      return WHITE;
-   if (fen.find(" b ") != string::npos)
-      return BLACK;
-
-   cout << "Warning: couldn't get color to move from FEN: " << fen << "\n";
-   return WHITE;
-}
-
 // PGN4 / chess.com format uses dashes, e.g. "h2-h3" instead of "h2h3"
 // PGN4 / chess.com format uses equals sign followed by capital letter for promotion, e.g. "j5-j4=Q" instead of "j5j4q"
 void convert_move_to_PGN4_format(string &move)

@@ -2,7 +2,6 @@
 #include <thread>
 #include <atomic>
 
-player_color get_color_to_move_from_fen(string fen);
 void convert_move_to_PGN4_format(string &move);
 
 class GameManager
