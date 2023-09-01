@@ -89,6 +89,8 @@ int Engine::get_features(void)
          m_xb_feature_ping = true;
       if (m_line.find("setboard=0", 0) != string::npos)
          m_xb_feature_setboard = false;
+      if (m_line.find("san=1", 0) != string::npos)
+         send_engine_cmd("rejected san");
 
       // An xboard engine should respond to the "protover 2" command with "feature done=1", or an error message like "Error (unknown command): protover".
       if (m_line.find("done=1", 0) != string::npos)
@@ -136,8 +138,7 @@ int Engine::readline(void)
       return 0;
    }
    rstrip(m_line);
-   if (m_uci)
-      lstrip(m_line);
+   lstrip(m_line);
    if (m_debug)
       cout << "FROM ENGINE " << m_ID << ": " << m_line << "\n";
    return 1;
@@ -229,6 +230,7 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
             xb_edit_board(fen);
       }
 
+      send_engine_cmd("easy");
       send_engine_cmd("post");
       if (fixed_time_ms)
       {

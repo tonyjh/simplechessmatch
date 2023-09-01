@@ -20,6 +20,7 @@ GameManager::GameManager(void)
    m_white_clock_ms = chrono::milliseconds(0);
    m_black_clock_ms = chrono::milliseconds(0);
    m_pgn_valid = false;
+   m_movelist.reserve(1000);
 }
 
 GameManager::~GameManager(void)
@@ -34,14 +35,24 @@ void GameManager::game_runner(void)
    m_loss_on_time = false;
    m_thread_running = true;
    m_num_moves = 0;
+   m_movelist = "";
 
    result = run_engine_game(chrono::milliseconds(options.tc_ms), chrono::milliseconds(options.tc_inc_ms),
                             chrono::milliseconds(options.tc_fixed_time_move_ms));
 
+   if (m_num_moves > 0)
+      store_pgn(result, m_swap_sides ? m_engine2.m_file_name : m_engine1.m_file_name, m_swap_sides ? m_engine1.m_file_name : m_engine2.m_file_name,
+                chrono::milliseconds(options.tc_ms), chrono::milliseconds(options.tc_inc_ms), chrono::milliseconds(options.tc_fixed_time_move_ms));
+
    if (result == ERROR_ENGINE_DISCONNECTED)
       m_engine_disconnected = true;
    else if (result == ERROR_ILLEGAL_MOVE)
+   {
       m_illegal_move_games++;
+      cout << "\n" << m_fen << "\n" << m_movelist << "\n";
+      if (m_num_moves > 0)
+         cout << "\n" << m_pgn << "\n";
+   }
    else if (((result == WHITE_WIN) && !m_swap_sides) || ((result == BLACK_WIN) && m_swap_sides))
    {
       m_engine1_wins++;
@@ -63,7 +74,6 @@ void GameManager::game_runner(void)
 game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms)
 {
    chrono::milliseconds elapsed_time_ms;
-   string movelist = "";
    game_result result = UNFINISHED;
    Engine *white_engine;
    Engine *black_engine;
@@ -78,8 +88,6 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
       white_engine = &m_engine1;
       black_engine = &m_engine2;
    }
-
-   movelist.reserve(1000);
 
    if (fixed_time_ms.count())
    {
@@ -138,8 +146,8 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          }
          m_white_clock_ms = (fixed_time_ms.count() ? (fixed_time_ms) : (m_white_clock_ms + increment_ms));
 
-         movelist.append(white_engine->m_move + " ");
-         black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, movelist, m_black_clock_ms.count(), m_white_clock_ms.count(), increment_ms.count(), fixed_time_ms.count());
+         m_movelist.append(white_engine->m_move + " ");
+         black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, m_movelist, m_black_clock_ms.count(), m_white_clock_ms.count(), increment_ms.count(), fixed_time_ms.count());
          m_timestamp = chrono::steady_clock::now();
          m_num_moves++;
          if (options.print_moves)
@@ -167,8 +175,8 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          }
          m_black_clock_ms = (fixed_time_ms.count() ? (fixed_time_ms) : (m_black_clock_ms + increment_ms));
 
-         movelist.append(black_engine->m_move + " ");
-         white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, movelist, m_white_clock_ms.count(), m_black_clock_ms.count(), increment_ms.count(), fixed_time_ms.count());
+         m_movelist.append(black_engine->m_move + " ");
+         white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, m_movelist, m_white_clock_ms.count(), m_black_clock_ms.count(), increment_ms.count(), fixed_time_ms.count());
          m_timestamp = chrono::steady_clock::now();
          m_num_moves++;
          if (options.print_moves)
@@ -192,20 +200,6 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
 
    white_engine->send_result_to_engine(result);
    black_engine->send_result_to_engine(result);
-
-   store_pgn(movelist, result, white_engine->m_file_name, black_engine->m_file_name, start_time_ms, increment_ms, fixed_time_ms);
-
-   if (result == ERROR_ILLEGAL_MOVE)
-   {
-      cout << "\n" << m_fen << "\n" << movelist << "\n";
-      cout << "\n" << m_pgn << "\n";
-   }
-
-   // if (options.debug)
-   // {
-      // cout << "Game result: " << result << ", " << white_engine->get_game_result() << ", " << black_engine->get_game_result() << "\n";
-      // cout << "engine evals: white = " << white_engine->get_eval() << ", black = " << black_engine->get_eval() << "\n";
-   // }
 
    return result;
 }
@@ -305,18 +299,19 @@ game_result GameManager::determine_game_result(Engine *white_engine, Engine *bla
    return result;
 }
 
-void GameManager::store_pgn(const string &movelist, game_result result, const string &white_name, const string &black_name,
+void GameManager::store_pgn(game_result result, const string &white_name, const string &black_name,
                             chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms)
 {
    if (options.pgn4_format)
    {
-      store_pgn4(movelist, result, white_name, black_name, start_time_ms, increment_ms, fixed_time_ms);
+      store_pgn4(result, white_name, black_name, start_time_ms, increment_ms, fixed_time_ms);
       return;
    }
 
    stringstream temp_pgn;
    string result_str;
-   vector<string> moves = get_tokens(movelist);
+   vector<string> moves = get_tokens(m_movelist);
+   int black_first = 0;
 
    if (!options.variant.empty())
       temp_pgn << "[Variant \"" << options.variant << "\"]\n";
@@ -341,27 +336,40 @@ void GameManager::store_pgn(const string &movelist, game_result result, const st
    {
       temp_pgn << "[SetUp \"1\"]\n";
       temp_pgn << "[FEN \"" << m_fen << "\"]\n";
+      if (get_color_to_move_from_fen(m_fen) == BLACK)
+      {
+         black_first = 1;
+         temp_pgn << "\n1... ";
+      }
    }
    for (int i = 0; i < moves.size(); i++)
    {
-      if ((i % 10) == 0)
-         temp_pgn << "\n" << ((i / 2) + 1) << ". " << moves[i];
-      else if ((i % 2) == 0)
-         temp_pgn << " " << ((i / 2) + 1) << ". " << moves[i];
+      int j = i + black_first;
+      if ((j % 10) == 0)
+         temp_pgn << "\n" << ((j / 2) + 1) << ". " << moves[i];
+      else if ((j % 2) == 0)
+         temp_pgn << " " << ((j / 2) + 1) << ". " << moves[i];
       else
          temp_pgn << " " << moves[i];
    }
+
+   if ((m_loss_on_time) && (result == WHITE_WIN))
+      result_str = "{White wins on time} 1-0";
+   if ((m_loss_on_time) && (result == BLACK_WIN))
+      result_str = "{Black wins on time} 0-1";
+
    temp_pgn << " " << result_str << "\n\n";
 
    m_pgn = temp_pgn.str();
    m_pgn_valid.store(true, memory_order_release);
 }
 
-void GameManager::store_pgn4(const string &movelist, game_result result, const string &white_name, const string &black_name,
+void GameManager::store_pgn4(game_result result, const string &white_name, const string &black_name,
                              chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms)
 {
    stringstream temp_pgn;
-   vector<string> moves = get_tokens(movelist);
+   vector<string> moves = get_tokens(m_movelist);
+   int first_player = 0;
 
    if ((result == WHITE_WIN) || (result == BLACK_WIN))
    {
@@ -393,12 +401,23 @@ void GameManager::store_pgn4(const string &movelist, game_result result, const s
       temp_pgn << "[Result \"*\"]\n";
 
    if (!m_fen.empty())
+   {
       temp_pgn << "[StartFen4 \"" << m_fen << "\"]\n";
+      if (m_fen.rfind("R-", 0) == 0)
+         first_player = 0;
+      else if (m_fen.rfind("B-", 0) == 0)
+         first_player = 1;
+      else if (m_fen.rfind("Y-", 0) == 0)
+         first_player = 2;
+      else if (m_fen.rfind("G-", 0) == 0)
+         first_player = 3;
+   }
    for (int i = 0; i < moves.size(); i++)
    {
+      int j = i + first_player;
       convert_move_to_PGN4_format(moves[i]);
-      if ((i % 4) == 0)
-         temp_pgn << "\n" << ((i / 4) + 1) << ". " << moves[i];
+      if (((j % 4) == 0) || (i == 0))
+         temp_pgn << "\n" << ((j / 4) + 1) << ". " << moves[i];
       else
          temp_pgn << " .. " << moves[i];
    }

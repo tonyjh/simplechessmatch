@@ -24,6 +24,7 @@ public:
    atomic<bool> m_pgn_valid;
 
 private:
+   string m_movelist;
    player_color m_turn;
    uint m_num_moves;
    bool m_loss_on_time;
@@ -41,8 +42,8 @@ public:
 private:
    game_result run_engine_game(chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms);
    game_result determine_game_result(Engine *white_engine, Engine *black_engine);
-   void store_pgn(const string &movelist, game_result result, const string &white_name, const string &black_name,
+   void store_pgn(game_result result, const string &white_name, const string &black_name,
                   chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms);
-   void store_pgn4(const string &movelist, game_result result, const string &white_name, const string &black_name,
+   void store_pgn4(game_result result, const string &white_name, const string &black_name,
                    chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms);
 };

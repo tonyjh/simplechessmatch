@@ -29,6 +29,7 @@ int main(int argc, char* argv[])
 
    if (match_mgr.load_all_engines() == 0)
    {
+      match_mgr.shut_down_all_engines();
       match_mgr.cleanup();
       return 0;
    }
@@ -45,6 +46,7 @@ int main(int argc, char* argv[])
 
    match_mgr.main_loop();
 
+   match_mgr.shut_down_all_engines();
    match_mgr.print_results();
    match_mgr.save_pgn();
 
@@ -73,8 +75,6 @@ void MatchManager::cleanup(void)
       m_FENs_file.close();
    if (m_pgn_file.is_open())
       m_pgn_file.close();
-
-   shut_down_all_engines();
 
    for (uint i = 0; i < options.num_threads; i++)
       if (m_thread[i].joinable())
