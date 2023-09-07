@@ -53,6 +53,7 @@ public:
    bool m_is_ready;
    bool m_quit_cmd_sent;
    bool m_resigned;
+   bool m_offered_draw;
 
 private:
    bp::child *m_child_proc;

@@ -14,13 +14,14 @@ GameManager::GameManager(void)
    m_thread_running = false;
    m_swap_sides = false;
    m_loss_on_time = false;
+   m_repetition_draw = false;
    m_error = false;
    m_engine_disconnected = false;
    m_num_moves = 0;
    m_white_clock_ms = chrono::milliseconds(0);
    m_black_clock_ms = chrono::milliseconds(0);
    m_pgn_valid = false;
-   m_movelist.reserve(1000);
+   m_move_list.reserve(1000);
 }
 
 GameManager::~GameManager(void)
@@ -33,9 +34,11 @@ void GameManager::game_runner(void)
 
    m_timestamp = chrono::steady_clock::now();
    m_loss_on_time = false;
+   m_repetition_draw = false;
    m_thread_running = true;
    m_num_moves = 0;
-   m_movelist = "";
+   m_move_list = "";
+   m_move_vector.clear();
 
    result = run_engine_game(chrono::milliseconds(options.tc_ms), chrono::milliseconds(options.tc_inc_ms),
                             chrono::milliseconds(options.tc_fixed_time_move_ms));
@@ -47,12 +50,7 @@ void GameManager::game_runner(void)
    if (result == ERROR_ENGINE_DISCONNECTED)
       m_engine_disconnected = true;
    else if (result == ERROR_ILLEGAL_MOVE)
-   {
       m_illegal_move_games++;
-      cout << "\n" << m_fen << "\n" << m_movelist << "\n";
-      if (m_num_moves > 0)
-         cout << "\n" << m_pgn << "\n";
-   }
    else if (((result == WHITE_WIN) && !m_swap_sides) || ((result == BLACK_WIN) && m_swap_sides))
    {
       m_engine1_wins++;
@@ -67,6 +65,13 @@ void GameManager::game_runner(void)
    }
    else if (result == DRAW)
       m_draws++;
+
+   if ((result == ERROR_ILLEGAL_MOVE) || (result == ERROR_INVALID_POSITION) || (result == UNDETERMINED))
+   {
+      cout << "\n" << m_fen << "\n" << m_move_list << "\n";
+      if (m_num_moves > 0)
+         cout << "\n" << m_pgn << "\n";
+   }
 
    m_thread_running = false;
 }
@@ -125,6 +130,19 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
 
    while ((white_engine->get_game_result() == UNFINISHED) && (black_engine->get_game_result() == UNFINISHED) && (m_num_moves < options.max_moves))
    {
+      if (white_engine->m_offered_draw && black_engine->m_offered_draw)
+      {
+         cout << "Draw by agreement (# moves = " << m_num_moves << ")\n";
+         result = DRAW;
+         break;
+      }
+      if (check_for_repetition_draw())
+      {
+         cout << "Draw by repetition (# moves = " << m_num_moves << ")\n";
+         m_repetition_draw = true;
+         result = DRAW;
+         break;
+      }
       if (m_turn == WHITE)
       {
          if (!white_engine->get_engine_move())
@@ -146,10 +164,9 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          }
          m_white_clock_ms = (fixed_time_ms.count() ? (fixed_time_ms) : (m_white_clock_ms + increment_ms));
 
-         m_movelist.append(white_engine->m_move + " ");
-         black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, m_movelist, m_black_clock_ms.count(), m_white_clock_ms.count(), increment_ms.count(), fixed_time_ms.count());
+         move_played(white_engine->m_move);
+         black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, m_move_list, m_black_clock_ms.count(), m_white_clock_ms.count(), increment_ms.count(), fixed_time_ms.count());
          m_timestamp = chrono::steady_clock::now();
-         m_num_moves++;
          if (options.print_moves)
             cout << "white moved: " << white_engine->m_move << ",   elapsed: " << elapsed_time_ms.count() << " ms,   white clock: "
                  << m_white_clock_ms.count() << " ms,  eval: " << white_engine->get_eval() << "\n";
@@ -175,10 +192,9 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          }
          m_black_clock_ms = (fixed_time_ms.count() ? (fixed_time_ms) : (m_black_clock_ms + increment_ms));
 
-         m_movelist.append(black_engine->m_move + " ");
-         white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, m_movelist, m_white_clock_ms.count(), m_black_clock_ms.count(), increment_ms.count(), fixed_time_ms.count());
+         move_played(black_engine->m_move);
+         white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, m_move_list, m_white_clock_ms.count(), m_black_clock_ms.count(), increment_ms.count(), fixed_time_ms.count());
          m_timestamp = chrono::steady_clock::now();
-         m_num_moves++;
          if (options.print_moves)
             cout << "black moved: " << black_engine->m_move << ",   elapsed: " << elapsed_time_ms.count() << " ms,   black clock: "
                  << m_black_clock_ms.count() << " ms,  eval: " << black_engine->get_eval() << "\n";
@@ -310,7 +326,6 @@ void GameManager::store_pgn(game_result result, const string &white_name, const 
 
    stringstream temp_pgn;
    string result_str;
-   vector<string> moves = get_tokens(m_movelist);
    int black_first = 0;
 
    if (!options.variant.empty())
@@ -342,20 +357,26 @@ void GameManager::store_pgn(game_result result, const string &white_name, const 
          temp_pgn << "\n1... ";
       }
    }
-   for (int i = 0; i < moves.size(); i++)
+   for (int i = 0; i < m_move_vector.size(); i++)
    {
       int j = i + black_first;
       if ((j % 10) == 0)
-         temp_pgn << "\n" << ((j / 2) + 1) << ". " << moves[i];
+         temp_pgn << "\n" << ((j / 2) + 1) << ". " << m_move_vector[i];
       else if ((j % 2) == 0)
-         temp_pgn << " " << ((j / 2) + 1) << ". " << moves[i];
+         temp_pgn << " " << ((j / 2) + 1) << ". " << m_move_vector[i];
       else
-         temp_pgn << " " << moves[i];
+         temp_pgn << " " << m_move_vector[i];
    }
 
-   if ((m_loss_on_time) && (result == WHITE_WIN))
+   if ((result == DRAW) && m_repetition_draw)
+      result_str = "{Draw by repetition} 1/2-1/2";
+   else if ((result == DRAW) && m_engine1.m_offered_draw && m_engine2.m_offered_draw)
+      result_str = "{Draw by agreement} 1/2-1/2";
+   else if ((result == DRAW) && (m_num_moves >= options.max_moves))
+      result_str = "{Draw due to max moves reached} 1/2-1/2";
+   else if ((m_loss_on_time) && (result == WHITE_WIN))
       result_str = "{White wins on time} 1-0";
-   if ((m_loss_on_time) && (result == BLACK_WIN))
+   else if ((m_loss_on_time) && (result == BLACK_WIN))
       result_str = "{Black wins on time} 0-1";
 
    temp_pgn << " " << result_str << "\n\n";
@@ -368,20 +389,24 @@ void GameManager::store_pgn4(game_result result, const string &white_name, const
                              chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms)
 {
    stringstream temp_pgn;
-   vector<string> moves = get_tokens(m_movelist);
    int first_player = 0;
 
    if ((result == WHITE_WIN) || (result == BLACK_WIN))
    {
       if (m_engine1.m_resigned || m_engine2.m_resigned)
-         moves.push_back("R"); // resignation
+         m_move_vector.push_back("R"); // resignation
       else if (m_loss_on_time)
-         moves.push_back("T"); // loss on time
+         m_move_vector.push_back("T"); // loss on time
       else
-         moves.push_back("#"); // checkmate
+         m_move_vector.push_back("#"); // checkmate
    }
    else if (result == DRAW)
-      moves.push_back("S"); // S should mean stalemate. Currently using S for any type of draw.
+   {
+      if ((m_repetition_draw) || (m_engine1.m_offered_draw && m_engine2.m_offered_draw) || (m_num_moves >= options.max_moves))
+         m_move_vector.push_back("D"); // Draw by repetition or by agreement or due to max moves reached
+      else
+         m_move_vector.push_back("S"); // Stalemate or other draw
+   }
 
    temp_pgn << "[Variant \"Teams\"]\n";
    temp_pgn << "[RuleVariants \"EnPassant\"]\n";
@@ -396,7 +421,15 @@ void GameManager::store_pgn4(game_result result, const string &white_name, const
    else if (result == BLACK_WIN)
       temp_pgn << "[Result \"0-1\"]\n";
    else if (result == DRAW)
+   {
       temp_pgn << "[Result \"1/2-1/2\"]\n";
+      if (m_repetition_draw)
+         temp_pgn << "[Termination \"Draw by repetition\"]\n";
+      else if (m_engine1.m_offered_draw && m_engine2.m_offered_draw)
+         temp_pgn << "[Termination \"Draw by agreement\"]\n";
+      else if (m_num_moves >= options.max_moves)
+         temp_pgn << "[Termination \"Draw due to max moves reached\"]\n";
+   }
    else
       temp_pgn << "[Result \"*\"]\n";
 
@@ -412,19 +445,45 @@ void GameManager::store_pgn4(game_result result, const string &white_name, const
       else if (m_fen.rfind("G-", 0) == 0)
          first_player = 3;
    }
-   for (int i = 0; i < moves.size(); i++)
+   for (int i = 0; i < m_move_vector.size(); i++)
    {
       int j = i + first_player;
-      convert_move_to_PGN4_format(moves[i]);
+      convert_move_to_PGN4_format(m_move_vector[i]);
       if (((j % 4) == 0) || (i == 0))
-         temp_pgn << "\n" << ((j / 4) + 1) << ". " << moves[i];
+         temp_pgn << "\n" << ((j / 4) + 1) << ". " << m_move_vector[i];
       else
-         temp_pgn << " .. " << moves[i];
+         temp_pgn << " .. " << m_move_vector[i];
    }
    temp_pgn << "\n\n";
 
    m_pgn = temp_pgn.str();
    m_pgn_valid.store(true, memory_order_release);
+}
+
+void GameManager::move_played(const string &move)
+{
+   m_move_list.append(move + " ");
+   m_move_vector.push_back(move);
+   m_num_moves++;
+}
+
+// check_for_repetition_draw will detect if both sides are repeating moves over and over.
+// if true is returned, then there has definitely been a 3-fold (or more) repetition of position.
+bool GameManager::check_for_repetition_draw(void)
+{
+   uint length_for_repeating_sequence = (options.fourplayerchess) ? 8 : 4;
+   if (m_num_moves > length_for_repeating_sequence * 5)
+   {
+      string move_sequence;
+
+      for (uint i = m_num_moves - length_for_repeating_sequence; i < m_num_moves; i++)
+         move_sequence.append(m_move_vector[i] + " ");
+
+      size_t pos = m_move_list.length() - (3 * move_sequence.length());
+      if (m_move_list.find(move_sequence + move_sequence + move_sequence, pos) != string::npos)
+         return true;
+   }
+   return false;
 }
 
 // PGN4 / chess.com format uses dashes, e.g. "h2-h3" instead of "h2h3"
@@ -433,7 +492,7 @@ void convert_move_to_PGN4_format(string &move)
 {
    // first, insert dash character if needed
    size_t i = 0;
-   if (move.find("-") != string::npos)
+   if ((move.find("-") != string::npos) || (move.length() == 1))
       return;
    while (isalpha(move[i]))
       i++;

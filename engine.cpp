@@ -13,6 +13,7 @@ Engine::Engine(void)
    m_color = BLACK;
    m_result = UNFINISHED;
    m_resigned = false;
+   m_offered_draw = false;
    m_is_ready = false;
    m_quit_cmd_sent = false;
    m_xb_feature_ping = false;
@@ -191,6 +192,7 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
 {
    m_result = UNFINISHED;
    m_resigned = false;
+   m_offered_draw = false;
    m_color = color;
    m_score = 0;
 
@@ -292,8 +294,9 @@ int Engine::get_engine_move(void)
          {
             m_move = get_first_token(m_line, 9);
 
-            // If the engine sent a "null" move such as below, then the engine has no legal moves, and is mated or stalemated.
-            if ((m_move == "0000") || (m_move == "(none)") || (m_move == "a1a1") || (m_move == ""))
+            // If the engine sent a "null" move, then the engine has no legal moves, and is mated or stalemated.
+            // The engine should send "0000" in this case, but many UCI engines send one of the alternatives below.
+            if ((m_move == "0000") || (m_move == "(none)") || (m_move == "none") || (m_move == "a1a1") || (m_move == ""))
             {
                m_result = NO_LEGAL_MOVES;
                m_move = "";
@@ -370,8 +373,8 @@ void Engine::check_engine_output(void)
             m_result = BLACK_WIN;
          else if (m_line.find("Stalemate") != string::npos)
             m_result = DRAW;
-         else if (m_line.find("Offer draw") != string::npos)
-            m_result = DRAW;
+         else if (m_line.find("offer draw") != string::npos)
+            m_offered_draw = true;
       }
    }
    else
@@ -398,7 +401,7 @@ void Engine::check_engine_output(void)
       else if (m_line.rfind("1/2-1/2", 0) == 0)
          m_result = DRAW;
       else if (m_line.rfind("offer draw", 0) == 0)
-         m_result = DRAW;
+         m_offered_draw = true;
       else if (isdigit(m_line[0]))
       {
          int ply, score, time, nodes;

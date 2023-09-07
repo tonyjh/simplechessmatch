@@ -188,6 +188,8 @@ int MatchManager::initialize(void)
          return 0;
       }
    }
+   else
+      options.pgn4_format = options.fourplayerchess;
 
    m_game_mgr = new GameManager[options.num_threads];
    m_thread = new thread[options.num_threads];

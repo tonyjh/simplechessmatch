@@ -24,10 +24,12 @@ public:
    atomic<bool> m_pgn_valid;
 
 private:
-   string m_movelist;
+   string m_move_list;
+   vector<string> m_move_vector;
    player_color m_turn;
    uint m_num_moves;
    bool m_loss_on_time;
+   bool m_repetition_draw;
    chrono::time_point<std::chrono::steady_clock> m_timestamp; // This timestamp is updated whenever either engine's clock should start running.
                                                               // It's also updated when game_runner starts running.
    chrono::milliseconds m_white_clock_ms;
@@ -46,4 +48,6 @@ private:
                   chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms);
    void store_pgn4(game_result result, const string &white_name, const string &black_name,
                    chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms);
+   void move_played(const string &move);
+   bool check_for_repetition_draw(void);
 };
