@@ -1,6 +1,8 @@
 #include "gamemanager.h"
 #include <boost/program_options.hpp>
 #include <fstream>
+#include <math.h>
+#include <iomanip>
 #ifdef WIN32
 #include <conio.h>
 #else

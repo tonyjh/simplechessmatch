@@ -318,12 +318,19 @@ void MatchManager::print_results(void)
       engine2_losses_on_time += m_game_mgr[i].m_engine2_losses_on_time;
    }
 
+   double engine1_score = ((double)engine1_wins + (double)draws / 2.0) / (double)(engine1_wins + engine2_wins + draws);
+   double engine2_score = 1.0 - engine1_score;
+   double elo_diff = log10(1.0 / engine1_score - 1.0) * 400.0;
+
+   stringstream ss;
    if (illegal_move_games != 0)
-      cout << "Engine1 (" << options.engine_file_name_1 << "): " << engine1_wins << " wins. Engine2 (" << options.engine_file_name_2 << "): " << engine2_wins <<  " wins.  " << draws << " draws.  " << illegal_move_games << " games ended with illegal move.\n";
-   else
-      cout << "Engine1 (" << options.engine_file_name_1 << "): " << engine1_wins << " wins. Engine2 (" << options.engine_file_name_2 << "): " << engine2_wins <<  " wins.  " << draws << " draws.\n";
+      ss << "  [games ending in illegal move: " << illegal_move_games << "]";
    if ((engine1_losses_on_time != 0) || (engine2_losses_on_time != 0))
-      cout << "Engine1 (" << options.engine_file_name_1 << "): " << engine1_losses_on_time << " losses on time. Engine2 (" << options.engine_file_name_2 << "): " << engine2_losses_on_time <<  " losses on time.\n";
+      ss << "  [losses on time: " << engine1_losses_on_time << " / " << engine2_losses_on_time <<  "]";
+
+   cout << setprecision(4);
+   cout << "Engine1 (" << options.engine_file_name_1 << "): " << engine1_wins << " wins. Engine2 (" << options.engine_file_name_2 << "): " << engine2_wins <<  " wins.  "
+        << draws << " draws.  " << 100.0 * engine1_score << "% - " << 100.0 * engine2_score << "%  elo " << (elo_diff >= 0.0 ? "+" : "") << elo_diff << ss.str() << "\n";
 
    return;
 }
