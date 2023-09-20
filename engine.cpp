@@ -236,7 +236,7 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
       send_engine_cmd("post");
       if (fixed_time_ms)
       {
-         if (fixed_time_ms >= 1000)
+         if ((fixed_time_ms % 1000) == 0)
             send_engine_cmd("st " + to_string((fixed_time_ms) / 1000));
          else
             send_engine_cmd("st " + to_string((float)(fixed_time_ms) / 1000.0));
@@ -244,13 +244,22 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
       else
       {
          // send "level" command.
-         // e.g. "level 0 2 12" or "level 0 0:30 0"
-         // note: increment will be in seconds, rounded down. (so, xboard engines won't be aware of an increment less than 1 second.)
          char cmd[100];
-         if (start_time_ms >= 60000)
-            snprintf(cmd, 100, "level 0 %d %d", (int)start_time_ms / 1000 / 60, (int)inc_time_ms / 1000);
+         if ((start_time_ms % 60000) == 0)
+         {
+            if ((inc_time_ms % 1000) == 0)
+               snprintf(cmd, 100, "level 0 %d %d", (int)start_time_ms / 60000, (int)inc_time_ms / 1000);
+            else
+               snprintf(cmd, 100, "level 0 %d %0.3f", (int)start_time_ms / 60000, (float)inc_time_ms / 1000.0);
+         }
          else
-            snprintf(cmd, 100, "level 0 0:%02d %d", (int)start_time_ms / 1000, (int)inc_time_ms / 1000);
+         {
+            if ((inc_time_ms % 1000) == 0)
+               snprintf(cmd, 100, "level 0 %d:%02d %d", (int)start_time_ms / 60000, (int)(start_time_ms % 60000) / 1000, (int)inc_time_ms / 1000);
+            else
+               snprintf(cmd, 100, "level 0 %d:%02d %0.3f", (int)start_time_ms / 60000, (int)(start_time_ms % 60000) / 1000, (float)inc_time_ms / 1000.0);
+         }
+
          send_engine_cmd(cmd);
          send_engine_cmd("time " + to_string(start_time_ms / 10));
          send_engine_cmd("otim " + to_string(start_time_ms / 10));

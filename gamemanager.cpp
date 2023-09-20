@@ -268,9 +268,15 @@ game_result GameManager::determine_game_result(Engine *white_engine, Engine *bla
       m_error = true;
       result = ERROR_INVALID_POSITION;
    }
+   else if ((white_result == DRAW) || (black_result == DRAW))
+   {
+      // Have DRAW claim takes precedence over other claims.
+      // Otherwise, there can be a results mismatch when 50-move draw is claimed but checkmate would have been possible on 51st move.
+      result = DRAW;
+   }
    else if (white_engine->got_decisive_result() && black_engine->got_decisive_result() && (white_result != black_result))
    {
-      cout << "Error: engines disagree on game result. " << white_result << ", " << black_result << "\n";
+      cout << "Error: engines disagree on game result. " << white_result << ", " << black_result << "; " << white_engine->m_offered_draw << ", " << black_engine->m_offered_draw << "\n";
       m_error = true;
       result = UNDETERMINED;
    }

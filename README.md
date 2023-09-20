@@ -11,6 +11,9 @@ Therefore, simplechessmatch does not do move legality checking.
 ***Not all engines will work!*** UCI engines that don't send mate scores usually won't work well with this tool, because the tool
 will have trouble telling apart checkmate vs stalemate, when both engines behave this way.
 
+Draw adjudication (threefold repetition, 50-move rule, insufficient material) isn't handled perfectly by this tool,
+since it doesn't know the rules of chess. This tool was mainly created for 4-player teams chess, where draws aren't common.
+
 ## Compiling
 
 To compile, Boost library must be installed.
