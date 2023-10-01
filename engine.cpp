@@ -20,6 +20,7 @@ Engine::Engine(void)
    m_xb_feature_colors = false;
    m_xb_features_done = false;
    m_xb_feature_setboard = true;
+   m_xb_feature_usermove = false;
    m_xb_force_mode = false;
    m_debug = false;
    m_score = 0;
@@ -83,6 +84,8 @@ int Engine::get_features(void)
    {
       if (readline() == 0)
          return 0;
+      if (m_line[0] == '#')
+         continue;
 
       if (m_line.find("colors=1", 0) != string::npos)
          m_xb_feature_colors = true;
@@ -92,6 +95,8 @@ int Engine::get_features(void)
          m_xb_feature_setboard = false;
       if (m_line.find("san=1", 0) != string::npos)
          send_engine_cmd("rejected san");
+      if (m_line.find("usermove=1", 0) != string::npos)
+         m_xb_feature_usermove = true;
 
       // An xboard engine should respond to the "protover 2" command with "feature done=1", or an error message like "Error (unknown command): protover".
       if (m_line.find("done=1", 0) != string::npos)
@@ -195,6 +200,7 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
    m_offered_draw = false;
    m_color = color;
    m_score = 0;
+   m_opponent_move = "none";
 
    if (m_uci)
    {
@@ -227,7 +233,11 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
       if (!fen.empty())
       {
          if (m_xb_feature_setboard)
+         {
+            send_engine_cmd("force");
+            m_xb_force_mode = true;
             send_engine_cmd("setboard " + fen);
+         }
          else
             xb_edit_board(fen);
       }
@@ -286,7 +296,10 @@ void Engine::engine_new_game_start(int64_t start_time_ms, int64_t inc_time_ms, i
          send_engine_cmd("go wtime " + to_string(start_time_ms) + " btime " + to_string(start_time_ms) + " winc " + to_string(inc_time_ms) + " binc " + to_string(inc_time_ms));
    }
    else
+   {
       send_engine_cmd("go");
+      m_xb_force_mode = false;
+   }
 }
 
 int Engine::get_engine_move(void)
@@ -319,6 +332,15 @@ int Engine::get_engine_move(void)
          if (m_line.rfind("move ", 0) == 0)
          {
             m_move = m_line.substr(5);
+            // Handle multi-part moves (required for duck chess variant).
+            // If move ends with a comma, the 2nd part of the move will be on the next line.
+            if (m_move[m_move.length() - 1] == ',')
+            {
+               if (readline() == 0)
+                  return 0;
+               if (m_line.rfind("move ", 0) == 0)
+                  m_move.append(m_line.substr(5));
+            }
             return 1;
          }
       }
@@ -388,7 +410,10 @@ void Engine::check_engine_output(void)
    }
    else
    {
-      if (m_line.rfind("Illegal move:", 0) == 0)
+      if (m_line[0] == '#')
+         return;
+      if ((m_line.rfind("Illegal move:", 0) == 0) ||
+          (m_line.rfind("Error (unknown command): " + m_opponent_move) == 0))
       {
          cout << "Illegal move reported by " << m_name << "\n";
          m_result = ERROR_ILLEGAL_MOVE;
@@ -429,6 +454,7 @@ void Engine::check_engine_output(void)
 
 void Engine::send_move_and_clocks_to_engine(const string &move, const string &startfen, const string &movelist, int64_t engine_clock_ms, int64_t opp_clock_ms, int64_t inc_ms, int64_t fixed_time_ms)
 {
+   m_opponent_move = move;
    if (m_uci)
    {
       if (startfen.empty())
@@ -453,7 +479,10 @@ void Engine::send_move_and_clocks_to_engine(const string &move, const string &st
          send_engine_cmd("time " + to_string(engine_clock_ms / 10));
          send_engine_cmd("otim " + to_string(opp_clock_ms / 10));
       }
-      send_engine_cmd(move);
+      if (m_xb_feature_usermove)
+         send_engine_cmd("usermove " + move);
+      else
+         send_engine_cmd(move);
       if (m_xb_force_mode)
       {
          send_engine_cmd("go");
@@ -628,6 +657,10 @@ void Engine::xb_edit_board(const string &fen)
 
 void rstrip(string &s)
 {
+   // if string is null terminated before the end of the string, truncate the string.
+   size_t len = strlen(s.c_str());
+   if (len < s.length())
+      s.erase(len);
    // strip spaces/tabs/newlines/etc.
    size_t end = s.find_last_not_of(" \t\r\n");
    s.erase((end == string::npos) ? 0 : (end + 1));

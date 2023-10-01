@@ -121,6 +121,9 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          cout << "Error: " << black_engine->m_name << " could not start a new game.\n";
       return ERROR_ENGINE_DISCONNECTED;
    }
+
+   this_thread::sleep_for(100ms);
+
    if (m_turn == WHITE)
       white_engine->engine_new_game_start(start_time_ms.count(), increment_ms.count(), fixed_time_ms.count());
    else

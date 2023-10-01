@@ -61,12 +61,14 @@ private:
    bp::ipstream m_out_stream;
    game_result m_result;
    string m_line;
+   string m_opponent_move;
    player_color m_color;
    int m_score;
    bool m_xb_feature_ping;          // xboard only
    bool m_xb_feature_colors;        // xboard only
    bool m_xb_features_done;         // xboard only
    bool m_xb_feature_setboard;      // xboard only
+   bool m_xb_feature_usermove;      // xboard only
    bool m_xb_force_mode;            // xboard only
    bool m_debug;
 
