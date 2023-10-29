@@ -28,6 +28,7 @@ private:
    vector<string> m_move_vector;
    player_color m_turn;
    uint m_num_moves;
+   uint m_drawish_count;
    bool m_loss_on_time;
    bool m_repetition_draw;
    chrono::time_point<std::chrono::steady_clock> m_timestamp; // This timestamp is updated whenever either engine's clock should start running.
@@ -50,4 +51,5 @@ private:
                    chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms);
    void move_played(const string &move);
    bool check_for_repetition_draw(void);
+   game_result check_for_adjudication(Engine *white_engine, Engine *black_engine);
 };

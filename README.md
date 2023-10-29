@@ -54,7 +54,14 @@ g++ -O3 engine.cpp gamemanager.cpp simplechessmatch.cpp -lboost_filesystem -lboo
   --games arg (=1000000) total number of games to play
   --threads arg (=1)     number of concurrent games to run
   --maxmoves arg (=1000) maximum number of moves per game (total) before
-                         adjudicating draw
+                         adjudicating draw regardless of scores
+  --earlywin             adjudicate win result early if both engines report
+                         mate scores
+  --earlydraw            adjudicate draw result early if both engine scores are
+                         in range (-drawscore <= score <= drawscore) for a
+                         total of drawmoves moves
+  --drawscore arg (=25)  drawscore (centipawns) value for "earlydraw" setting
+  --drawmoves arg (=20)  drawmoves value for "earlydraw" setting
   --fens arg             file containing FENs for opening positions (one FEN
                          per line)
   --variant arg          variant name

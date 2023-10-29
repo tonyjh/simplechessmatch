@@ -391,7 +391,11 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("margin",     po::value<uint>(&options.margin_ms)->default_value(50), "An engine loses on time if its clock goes below zero for this amount of time (ms).")
          ("games",      po::value<uint>(&options.num_games_to_play)->default_value(1000000), "total number of games to play")
          ("threads",    po::value<uint>(&options.num_threads)->default_value(1), "number of concurrent games to run")
-         ("maxmoves",   po::value<uint>(&options.max_moves)->default_value(1000), "maximum number of moves per game (total) before adjudicating draw")
+         ("maxmoves",   po::value<uint>(&options.max_moves)->default_value(1000), "maximum number of moves per game (total) before adjudicating draw regardless of scores")
+         ("earlywin",   "adjudicate win result early if both engines report mate scores")
+         ("earlydraw",  "adjudicate draw result early if both engine scores are in range (-drawscore <= score <= drawscore) for a total of drawmoves moves")
+         ("drawscore",  po::value<uint>(&options.draw_score)->default_value(25), "drawscore (centipawns) value for \"earlydraw\" setting")
+         ("drawmoves",  po::value<uint>(&options.draw_moves)->default_value(20), "drawmoves value for \"earlydraw\" setting")
          ("fens",       po::value<string>(&options.fens_filename), "file containing FENs for opening positions (one FEN per line)")
          ("variant",    po::value<string>(&options.variant), "variant name")
          ("4pc",        "enable 4 player chess (teams) mode")
@@ -418,6 +422,8 @@ int parse_cmd_line_options(int argc, char* argv[])
       options.continue_on_error = (var_map.count("continue") != 0);
       options.print_moves = (var_map.count("pmoves") != 0);
       options.fourplayerchess = (var_map.count("4pc") != 0);
+      options.early_win = (var_map.count("earlywin") != 0);
+      options.early_draw = (var_map.count("earlydraw") != 0);
    }
    catch (exception &e)
    {

@@ -5,6 +5,8 @@
 #include <cctype>
 #include <sstream>
 
+#define ABS(a)                (((a) > 0) ? (a) : (0 - (a)))
+
 namespace bp = boost::process;
 using namespace std;
 
@@ -94,6 +96,7 @@ public:
    bool is_checkmated(void);
    bool is_checkmating(void);
    bool is_getting_checkmated(void);
+   bool is_drawish(void);
    bool got_decisive_result(void);
    game_result get_game_result(void);
    void update_game_result(void);
@@ -125,6 +128,10 @@ struct options_info
    bool continue_on_error;
    bool fourplayerchess;
    bool pgn4_format;
+   bool early_win;
+   bool early_draw;
+   uint draw_score;
+   uint draw_moves;
    uint tc_ms;
    uint tc_inc_ms;
    uint tc_fixed_time_move_ms;

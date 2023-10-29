@@ -18,6 +18,7 @@ GameManager::GameManager(void)
    m_error = false;
    m_engine_disconnected = false;
    m_num_moves = 0;
+   m_drawish_count = 0;
    m_white_clock_ms = chrono::milliseconds(0);
    m_black_clock_ms = chrono::milliseconds(0);
    m_pgn_valid = false;
@@ -37,6 +38,7 @@ void GameManager::game_runner(void)
    m_repetition_draw = false;
    m_thread_running = true;
    m_num_moves = 0;
+   m_drawish_count = 0;
    m_move_list = "";
    m_move_vector.clear();
 
@@ -133,19 +135,13 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
 
    while ((white_engine->get_game_result() == UNFINISHED) && (black_engine->get_game_result() == UNFINISHED) && (m_num_moves < options.max_moves))
    {
-      if (white_engine->m_offered_draw && black_engine->m_offered_draw)
+      game_result adjudicate_result = check_for_adjudication(white_engine, black_engine);
+      if (adjudicate_result != UNFINISHED)
       {
-         cout << "Draw by agreement (# moves = " << m_num_moves << ")\n";
-         result = DRAW;
+         result = adjudicate_result;
          break;
       }
-      if (check_for_repetition_draw())
-      {
-         cout << "Draw by repetition (# moves = " << m_num_moves << ")\n";
-         m_repetition_draw = true;
-         result = DRAW;
-         break;
-      }
+
       if (m_turn == WHITE)
       {
          if (!white_engine->get_engine_move())
@@ -383,6 +379,8 @@ void GameManager::store_pgn(game_result result, const string &white_name, const 
       result_str = "{Draw by agreement} 1/2-1/2";
    else if ((result == DRAW) && (m_num_moves >= options.max_moves))
       result_str = "{Draw due to max moves reached} 1/2-1/2";
+   else if ((result == DRAW) && options.early_draw && (m_drawish_count >= options.draw_moves))
+      result_str = "{Draw adjudicated} 1/2-1/2";
    else if ((m_loss_on_time) && (result == WHITE_WIN))
       result_str = "{White wins on time} 1-0";
    else if ((m_loss_on_time) && (result == BLACK_WIN))
@@ -411,8 +409,11 @@ void GameManager::store_pgn4(game_result result, const string &white_name, const
    }
    else if (result == DRAW)
    {
-      if ((m_repetition_draw) || (m_engine1.m_offered_draw && m_engine2.m_offered_draw) || (m_num_moves >= options.max_moves))
-         m_move_vector.push_back("D"); // Draw by repetition or by agreement or due to max moves reached
+      if ((m_repetition_draw) ||
+          (m_engine1.m_offered_draw && m_engine2.m_offered_draw) ||
+          (m_num_moves >= options.max_moves) ||
+          (options.early_draw && (m_drawish_count >= options.draw_moves)))
+         m_move_vector.push_back("D"); // Draw by repetition, or draw by agreement, or draw adjudicated
       else
          m_move_vector.push_back("S"); // Stalemate or other draw
    }
@@ -438,6 +439,8 @@ void GameManager::store_pgn4(game_result result, const string &white_name, const
          temp_pgn << "[Termination \"Draw by agreement\"]\n";
       else if (m_num_moves >= options.max_moves)
          temp_pgn << "[Termination \"Draw due to max moves reached\"]\n";
+      else if (options.early_draw && (m_drawish_count >= options.draw_moves))
+         temp_pgn << "[Termination \"Draw adjudicated\"]\n";
    }
    else
       temp_pgn << "[Result \"*\"]\n";
@@ -474,6 +477,42 @@ void GameManager::move_played(const string &move)
    m_move_list.append(move + " ");
    m_move_vector.push_back(move);
    m_num_moves++;
+}
+
+game_result GameManager::check_for_adjudication(Engine *white_engine, Engine *black_engine)
+{
+   if (white_engine->m_offered_draw && black_engine->m_offered_draw)
+   {
+      cout << "Draw by agreement (# moves = " << m_num_moves << ")\n";
+      return DRAW;
+   }
+   if (check_for_repetition_draw())
+   {
+      cout << "Draw by repetition (# moves = " << m_num_moves << ")\n";
+      m_repetition_draw = true;
+      return DRAW;
+   }
+   if (options.early_win)
+   {
+      if (white_engine->is_checkmating() && black_engine->is_getting_checkmated())
+         return WHITE_WIN;
+      if (black_engine->is_checkmating() && white_engine->is_getting_checkmated())
+         return BLACK_WIN;
+   }
+   if (options.early_draw && (m_num_moves > 40))
+   {
+      if (white_engine->is_drawish() && black_engine->is_drawish())
+         m_drawish_count++;
+      else
+         m_drawish_count = 0;
+      if (m_drawish_count >= options.draw_moves)
+      {
+         cout << "Adjudicated draw (# moves = " << m_num_moves << ")\n";
+         return DRAW;
+      }
+   }
+
+   return UNFINISHED;
 }
 
 // check_for_repetition_draw will detect if both sides are repeating moves over and over.

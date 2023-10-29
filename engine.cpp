@@ -551,6 +551,12 @@ bool Engine::is_getting_checkmated(void)
    return (m_score <= mate_score_neg);
 }
 
+bool Engine::is_drawish(void)
+{
+   // true if engine's score is drawish (close to 0).
+   return ((uint)ABS(m_score) <= options.draw_score);
+}
+
 bool Engine::got_decisive_result(void)
 {
    return ((m_result == WHITE_WIN) || (m_result == BLACK_WIN) || (m_result == DRAW));
