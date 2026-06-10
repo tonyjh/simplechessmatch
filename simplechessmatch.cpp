@@ -280,6 +280,8 @@ void MatchManager::set_engine_options(Engine *engine)
       else
          engine->send_engine_cmd("cores " + to_string(options.num_cores_2));
    }
+   if (!engine->m_uci && options.fourplayerchess && !options.legacy_clocks)
+      engine->send_engine_cmd("option Separate Clocks=1"); // for xboard 4pc engines
 }
 
 void MatchManager::send_engine_custom_commands(Engine *engine)

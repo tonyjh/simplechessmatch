@@ -42,10 +42,14 @@ enum player_color
 
 enum player_color_4pc
 {
-   RED,
-   BLUE,
-   YELLOW,
-   GREEN
+   PLAYER1,
+   RED = PLAYER1,
+   PLAYER2,
+   BLUE = PLAYER2,
+   PLAYER3,
+   YELLOW = PLAYER3,
+   PLAYER4,
+   GREEN = PLAYER4,
 };
 
 enum engine_number
@@ -107,7 +111,8 @@ public:
    int wait_for_ready(bool check_output);
    int engine_new_game_setup(player_color color, player_color turn, int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, const string &fen, const string &variant);
    void engine_new_game_start(int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms);
-   void send_move_and_clocks_to_engine(const string &move, const string &startfen, const string &movelist, int64_t engine_clock_ms, int64_t opp_clock_ms, int64_t rtime, int64_t bltime, int64_t ytime, int64_t gtime, int64_t inc_ms, int64_t fixed_time_ms);
+   void send_move_and_clocks_to_engine(const string &move, const string &startfen, const string &movelist, chrono::milliseconds player_clocks_ms[4],
+                                       int64_t inc_ms, int64_t fixed_time_ms, player_color_4pc turn_4pc);
    void send_result_to_engine(game_result result);
    bool is_running(void);
    void force_exit(void);

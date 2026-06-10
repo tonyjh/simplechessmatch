@@ -23,6 +23,8 @@ public:
    string m_fen;
    string m_pgn;
    atomic<bool> m_pgn_valid;
+   static constexpr const char* color_names[2] = {"white", "black"};
+   static constexpr const char* color_names_4pc[4] = {"red", "blue", "yellow", "green"};
 
 private:
    string m_move_list;
@@ -35,12 +37,7 @@ private:
    bool m_repetition_draw;
    chrono::time_point<std::chrono::steady_clock> m_timestamp; // This timestamp is updated whenever either engine's clock should start running.
                                                               // It's also updated when game_runner starts running.
-   chrono::milliseconds m_white_clock_ms;
-   chrono::milliseconds m_black_clock_ms;
-   chrono::milliseconds m_red_clock_ms;
-   chrono::milliseconds m_blue_clock_ms;
-   chrono::milliseconds m_yellow_clock_ms;
-   chrono::milliseconds m_green_clock_ms;
+   chrono::milliseconds m_player_clocks_ms[PLAYER4 + 1];
 
 public:
    GameManager(void);

@@ -21,13 +21,10 @@ GameManager::GameManager(void)
    m_engine_disconnected = false;
    m_num_moves = 0;
    m_drawish_count = 0;
-   
-   m_white_clock_ms = chrono::milliseconds(0);
-   m_black_clock_ms = chrono::milliseconds(0);
-   m_red_clock_ms = chrono::milliseconds(0);
-   m_blue_clock_ms = chrono::milliseconds(0);
-   m_yellow_clock_ms = chrono::milliseconds(0);
-   m_green_clock_ms = chrono::milliseconds(0);
+   m_player_clocks_ms[PLAYER1] = chrono::milliseconds(0);
+   m_player_clocks_ms[PLAYER2] = chrono::milliseconds(0);
+   m_player_clocks_ms[PLAYER3] = chrono::milliseconds(0);
+   m_player_clocks_ms[PLAYER4] = chrono::milliseconds(0);
 
    m_pgn_valid = false;
    m_move_list.reserve(1000);
@@ -106,21 +103,17 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
 
    if (fixed_time_ms.count())
    {
-      m_white_clock_ms = fixed_time_ms;
-      m_black_clock_ms = fixed_time_ms;
-      m_red_clock_ms = fixed_time_ms;
-      m_blue_clock_ms = fixed_time_ms;
-      m_yellow_clock_ms = fixed_time_ms;
-      m_green_clock_ms = fixed_time_ms;
+      m_player_clocks_ms[PLAYER1] = fixed_time_ms;
+      m_player_clocks_ms[PLAYER2] = fixed_time_ms;
+      m_player_clocks_ms[PLAYER3] = fixed_time_ms;
+      m_player_clocks_ms[PLAYER4] = fixed_time_ms;
    }
    else
    {
-      m_white_clock_ms = start_time_ms;
-      m_black_clock_ms = start_time_ms;
-      m_red_clock_ms = start_time_ms;
-      m_blue_clock_ms = start_time_ms;
-      m_yellow_clock_ms = start_time_ms;
-      m_green_clock_ms = start_time_ms;
+      m_player_clocks_ms[PLAYER1] = start_time_ms;
+      m_player_clocks_ms[PLAYER2] = start_time_ms;
+      m_player_clocks_ms[PLAYER3] = start_time_ms;
+      m_player_clocks_ms[PLAYER4] = start_time_ms;
    }
 
    this_thread::sleep_for(100ms);
@@ -129,8 +122,6 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
 
    if (options.fourplayerchess)
       m_turn_4pc = get_color_4pc_to_move_from_fen(m_fen);
-   else
-      m_turn_4pc = (m_turn == WHITE) ? RED : BLUE;
 
    if (white_engine->engine_new_game_setup(WHITE, m_turn, start_time_ms.count(), increment_ms.count(), fixed_time_ms.count(), m_fen, options.variant) == 0)
    {
@@ -164,32 +155,17 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
       }
 
       chrono::milliseconds *current_clock_ptr;
-      chrono::milliseconds *next_clock_ptr;
       string color_name;
 
-      if (options.fourplayerchess && !options.legacy_clocks)
-      {
-         if (m_turn_4pc == RED) { current_clock_ptr = &m_red_clock_ms; next_clock_ptr = &m_blue_clock_ms; color_name = "red"; }
-         else if (m_turn_4pc == BLUE) { current_clock_ptr = &m_blue_clock_ms; next_clock_ptr = &m_yellow_clock_ms; color_name = "blue"; }
-         else if (m_turn_4pc == YELLOW) { current_clock_ptr = &m_yellow_clock_ms; next_clock_ptr = &m_green_clock_ms; color_name = "yellow"; }
-         else { current_clock_ptr = &m_green_clock_ms; next_clock_ptr = &m_red_clock_ms; color_name = "green"; }
-      }
+      if (options.fourplayerchess)
+         color_name = color_names_4pc[m_turn_4pc];
       else
-      {
+         color_name = color_names[m_turn];
+      if (options.fourplayerchess && !options.legacy_clocks)
+         current_clock_ptr = &m_player_clocks_ms[m_turn_4pc];
+      else
          // Standard chess, or 4PC with legacy clocks
-         if (options.fourplayerchess)
-         {
-            if (m_turn_4pc == RED) { current_clock_ptr = &m_white_clock_ms; next_clock_ptr = &m_black_clock_ms; color_name = "red"; }
-            else if (m_turn_4pc == BLUE) { current_clock_ptr = &m_black_clock_ms; next_clock_ptr = &m_white_clock_ms; color_name = "blue"; }
-            else if (m_turn_4pc == YELLOW) { current_clock_ptr = &m_white_clock_ms; next_clock_ptr = &m_black_clock_ms; color_name = "yellow"; }
-            else { current_clock_ptr = &m_black_clock_ms; next_clock_ptr = &m_white_clock_ms; color_name = "green"; }
-         }
-         else
-         {
-            if (m_turn == WHITE) { current_clock_ptr = &m_white_clock_ms; next_clock_ptr = &m_black_clock_ms; color_name = "white"; }
-            else { current_clock_ptr = &m_black_clock_ms; next_clock_ptr = &m_white_clock_ms; color_name = "black"; }
-         }
-      }
+         current_clock_ptr = &m_player_clocks_ms[m_turn];
 
       if (m_turn == WHITE)
       {
@@ -217,11 +193,9 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          convert_move_to_standard_engine_format(white_engine->m_move);
          move_played(white_engine->m_move);
 
-         black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, m_move_list, 
-                                                      next_clock_ptr->count(), current_clock_ptr->count(), 
-                                                      m_red_clock_ms.count(), m_blue_clock_ms.count(), m_yellow_clock_ms.count(), m_green_clock_ms.count(), 
-                                                      increment_ms.count(), fixed_time_ms.count());
-         
+         black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
+                                                      increment_ms.count(), fixed_time_ms.count(), m_turn_4pc);
+
          m_timestamp = chrono::steady_clock::now();
          if (options.print_moves)
          {
@@ -255,10 +229,8 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          convert_move_to_standard_engine_format(black_engine->m_move);
          move_played(black_engine->m_move);
 
-         white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, m_move_list, 
-                                                      next_clock_ptr->count(), current_clock_ptr->count(), 
-                                                      m_red_clock_ms.count(), m_blue_clock_ms.count(), m_yellow_clock_ms.count(), m_green_clock_ms.count(), 
-                                                      increment_ms.count(), fixed_time_ms.count());
+         white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
+                                                      increment_ms.count(), fixed_time_ms.count(), m_turn_4pc);
 
          m_timestamp = chrono::steady_clock::now();
          if (options.print_moves)
@@ -268,7 +240,8 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          }
       }
 
-      m_turn_4pc = options.fourplayerchess ? static_cast<player_color_4pc>((m_turn_4pc + 1) % 4) : static_cast<player_color_4pc>((m_turn_4pc + 1) % 2);
+      if (options.fourplayerchess)
+         m_turn_4pc = static_cast<player_color_4pc>((m_turn_4pc + 1) % 4);
       m_turn = (m_turn == WHITE) ? BLACK : WHITE;
    }
 
@@ -298,16 +271,9 @@ bool GameManager::is_engine_unresponsive(void)
       chrono::milliseconds clock_ms;
 
       if (options.fourplayerchess && !options.legacy_clocks)
-      {
-         if (m_turn_4pc == RED) clock_ms = m_red_clock_ms;
-         else if (m_turn_4pc == BLUE) clock_ms = m_blue_clock_ms;
-         else if (m_turn_4pc == YELLOW) clock_ms = m_yellow_clock_ms;
-         else clock_ms = m_green_clock_ms;
-      }
+         clock_ms = m_player_clocks_ms[m_turn_4pc];
       else
-      {
-         clock_ms = (m_turn == WHITE) ? m_white_clock_ms : m_black_clock_ms;
-      }
+         clock_ms = m_player_clocks_ms[m_turn];
 
       if ((elapsed_time_ms > 5s) && (!m_engine1.m_is_ready || !m_engine2.m_is_ready))
       {
