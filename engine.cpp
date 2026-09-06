@@ -24,6 +24,9 @@ Engine::Engine(void)
    m_xb_force_mode = false;
    m_debug = false;
    m_score = 0;
+   m_depth = 0;
+   m_sel_depth = 0;
+   m_nodes = 0;
    m_line.reserve(200);
 }
 
@@ -315,6 +318,9 @@ void Engine::engine_new_game_start(int64_t start_time_ms, int64_t inc_time_ms, i
 int Engine::get_engine_move(void)
 {
    m_move = "";
+   m_depth = 0;
+   m_sel_depth = 0;
+   m_nodes = 0;
 
    while (1)
    {
@@ -370,9 +376,16 @@ void Engine::check_engine_output(void)
 
       if (m_line.rfind("info", 0) == 0)
       {
-         // check for score. e.g. "info score cp 123" or "info score mate -3"
+         // check for score and depth. e.g. "info score cp 123" or "info score mate -3" or "info depth 10"
          tokens = get_tokens(m_line);
          for (size_t i = 1; i < tokens.size() - 2; i++)
+         {
+            if (tokens[i] == "depth")
+               m_depth = atoi(tokens[i + 1].c_str());
+            if (tokens[i] == "seldepth")
+               m_sel_depth = atoi(tokens[i + 1].c_str());
+            if (tokens[i] == "nodes")
+               m_nodes = atoi(tokens[i + 1].c_str());
             if (tokens[i] == "score")
             {
                if (tokens[i + 1] == "cp")
@@ -389,6 +402,7 @@ void Engine::check_engine_output(void)
                   m_score = (n <= 0) ? (mate_score_neg + n) : (mate_score + n);
                }
             }
+         }
       }
 
       if (m_line.rfind("info string", 0) == 0)
@@ -452,15 +466,25 @@ void Engine::check_engine_output(void)
          m_offered_draw = true;
       else if (isdigit(m_line[0]))
       {
-         int ply, score, time, nodes;
-         stringstream ss(m_line);
-         if (ss >> ply >> score >> time >> nodes)
+         int depth, score, time, nodes;
+         size_t tab_pos = m_line.rfind('\t');
+         string header = (tab_pos != string::npos) ? m_line.substr(0, tab_pos) : m_line;
+         stringstream ss(header);
+         if (ss >> depth >> score >> time >> nodes)
          {
             m_score = score;
+            m_depth = depth;
+            m_nodes = nodes;
             if (m_score > (mate_score + 999))
                m_score = (mate_score + 999);
             if (m_score < (mate_score_neg - 999))
                m_score = mate_score_neg - 999;
+            if (tab_pos != string::npos)
+            {
+               uint sel_depth;
+               if (ss >> sel_depth)
+                  m_sel_depth = sel_depth;
+            }
          }
       }
    }
@@ -628,6 +652,26 @@ string Engine::get_eval(void)
    else
       s = to_string(m_score);
    return s;
+}
+
+uint Engine::get_depth(void)
+{
+   return m_depth;
+}
+
+uint Engine::get_sel_depth(void)
+{
+   return m_sel_depth;
+}
+
+uint64_t Engine::get_nodes(void)
+{
+   return m_nodes;
+}
+
+bool Engine::is_mate_score(void)
+{
+   return (m_score > mate_score) || (m_score <= mate_score_neg);
 }
 
 // This function is only for old xboard engines that support the "edit" command instead of the "setboard" command.

@@ -33,6 +33,8 @@ private:
    bool m_engines_shut_down;
    fstream m_FENs_file;
    fstream m_pgn_file;
+   string m_tc_str;
+   chrono::time_point<chrono::steady_clock> m_match_start_time;
 
 public:
    MatchManager(void);
@@ -44,6 +46,8 @@ public:
    void set_engine_options(Engine *engine);
    void send_engine_custom_commands(Engine *engine);
    void print_results(void);
+   void print_final_results(void);
+   void print_thread_results(void);
    void save_pgn(void);
    void shut_down_all_engines(void);
 

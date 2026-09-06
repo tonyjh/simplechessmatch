@@ -16,6 +16,11 @@ public:
    uint m_engine1_losses_on_time;
    uint m_engine2_losses_on_time;
    uint m_illegal_move_games;
+   uint64_t m_engine_total_depth[2];
+   uint64_t m_engine_total_sel_depth[2];
+   uint64_t m_engine_total_time_ms[2];
+   uint64_t m_engine_total_nodes[2];
+   uint64_t m_engine_num_moves[2];
    bool m_thread_running;
    bool m_swap_sides;
    bool m_error;

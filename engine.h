@@ -89,6 +89,9 @@ private:
    string m_opponent_move;
    player_color m_color;
    int m_score;
+   uint m_depth;
+   uint m_sel_depth;
+   uint64_t m_nodes;
    bool m_xb_feature_ping;          // xboard only
    bool m_xb_feature_colors;        // xboard only
    bool m_xb_features_done;         // xboard only
@@ -125,6 +128,10 @@ public:
    game_result get_game_result(void);
    void update_game_result(void);
    string get_eval(void);
+   uint get_depth(void);
+   uint get_sel_depth(void);
+   uint64_t get_nodes(void);
+   bool is_mate_score(void);
    void xb_edit_board(const string &fen);
 
 private:

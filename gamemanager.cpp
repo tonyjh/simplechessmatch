@@ -13,6 +13,16 @@ GameManager::GameManager(void)
    m_engine1_losses_on_time = 0;
    m_engine2_losses_on_time = 0;
    m_illegal_move_games = 0;
+   m_engine_total_depth[FIRST] = 0;
+   m_engine_total_depth[SECOND] = 0;
+   m_engine_total_sel_depth[FIRST] = 0;
+   m_engine_total_sel_depth[SECOND] = 0;
+   m_engine_total_time_ms[FIRST] = 0;
+   m_engine_total_time_ms[SECOND] = 0;
+   m_engine_total_nodes[FIRST] = 0;
+   m_engine_total_nodes[SECOND] = 0;
+   m_engine_num_moves[FIRST] = 0;
+   m_engine_num_moves[SECOND] = 0;
    m_thread_running = false;
    m_swap_sides = false;
    m_loss_on_time = false;
@@ -193,6 +203,15 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          convert_move_to_standard_engine_format(white_engine->m_move);
          move_played(white_engine->m_move);
 
+         if (!white_engine->is_mate_score())
+         {
+            m_engine_total_depth[white_engine->m_number] += white_engine->get_depth();
+            m_engine_total_sel_depth[white_engine->m_number] += white_engine->get_sel_depth();
+            m_engine_total_time_ms[white_engine->m_number] += elapsed_time_ms.count();
+            m_engine_total_nodes[white_engine->m_number] += white_engine->get_nodes();
+            m_engine_num_moves[white_engine->m_number]++;
+         }
+
          black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
                                                       increment_ms.count(), fixed_time_ms.count(), m_turn_4pc);
 
@@ -228,6 +247,15 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
 
          convert_move_to_standard_engine_format(black_engine->m_move);
          move_played(black_engine->m_move);
+
+         if (!black_engine->is_mate_score())
+         {
+            m_engine_total_depth[black_engine->m_number] += black_engine->get_depth();
+            m_engine_total_sel_depth[black_engine->m_number] += black_engine->get_sel_depth();
+            m_engine_total_time_ms[black_engine->m_number] += elapsed_time_ms.count();
+            m_engine_total_nodes[black_engine->m_number] += black_engine->get_nodes();
+            m_engine_num_moves[black_engine->m_number]++;
+         }
 
          white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
                                                       increment_ms.count(), fixed_time_ms.count(), m_turn_4pc);
