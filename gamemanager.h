@@ -21,13 +21,15 @@ public:
    uint64_t m_engine_total_time_ms[2];
    uint64_t m_engine_total_nodes[2];
    uint64_t m_engine_num_moves[2];
-   bool m_thread_running;
+   atomic<bool> m_thread_running;
    bool m_swap_sides;
    bool m_error;
    bool m_engine_disconnected;
    string m_fen;
    string m_pgn;
    atomic<bool> m_pgn_valid;
+   game_result m_final_result;
+   uint m_pair_id;
    static constexpr const char* color_names[2] = {"white", "black"};
    static constexpr const char* color_names_4pc[4] = {"red", "blue", "yellow", "green"};
 

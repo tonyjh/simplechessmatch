@@ -38,6 +38,9 @@ GameManager::GameManager(void)
 
    m_pgn_valid = false;
    m_move_list.reserve(1000);
+
+   m_final_result = UNFINISHED;
+   m_pair_id = 0;
 }
 
 GameManager::~GameManager(void)
@@ -89,6 +92,8 @@ void GameManager::game_runner(void)
       if (m_num_moves > 0)
          cout << "\n" << m_pgn << "\n";
    }
+
+   m_final_result = result;
 
    m_thread_running = false;
 }

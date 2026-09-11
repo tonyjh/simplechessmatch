@@ -24,52 +24,68 @@ To compile, Boost library must be installed.
 
 ## Command line options
 ```
-  --help                 print help message
-  --e1 arg               first engine's file name
-  --e2 arg               second engine's file name
-  --x1                   first engine uses xboard protocol. (UCI is the default
-                         protocol.)
-  --x2                   second engine uses xboard protocol. (UCI is the
-                         default protocol.)
-  --cores1 arg (=1)      first engine number of cores
-  --cores2 arg (=1)      second engine number of cores
-  --mem1 arg (=128)      first engine memory usage (MB)
-  --mem2 arg (=128)      second engine memory usage (MB)
-  --custom1 arg          first engine custom command. e.g. --custom1 "setoption
-                         name Style value Risky"
-  --custom2 arg          second engine custom command. Note: --custom1 and
-                         --custom2 can be used more than once in the command
-                         line.
-  --debug1               enable debug for first engine
-  --debug2               enable debug for second engine
-  --tc arg (=10000)      time control base time (ms)
-  --inc arg (=100)       time control increment (ms)
-  --fixed arg (=0)       time control fixed time per move (ms). This must be
-                         set to 0, unless engines should simply use a fixed
-                         amount of time per move.
-  --margin arg (=50)     An engine loses on time if its clock goes below zero
-                         for this amount of time (ms).
-  --games arg (=1000000) total number of games to play
-  --threads arg (=1)     number of concurrent games to run
-  --maxmoves arg (=1000) maximum number of moves per game (total) before
-                         adjudicating draw regardless of scores
-  --earlywin             adjudicate win result early if both engines report
-                         mate scores
-  --earlydraw            adjudicate draw result early if both engine scores are
-                         in range (-drawscore <= score <= drawscore) for a
-                         total of drawmoves moves
-  --drawscore arg (=25)  drawscore (centipawns) value for "earlydraw" setting
-  --drawmoves arg (=20)  drawmoves value for "earlydraw" setting
-  --fens arg             file containing FENs for opening positions (one FEN
-                         per line)
-  --variant arg          variant name
-  --4pc                  enable 4 player chess (teams) mode
-  --legacy-clocks        use legacy 2-clock system instead of independent
-                         4-player clocks
-  --continue             continue match if error occurs (e.g. illegal move)
-  --pmoves               print out all moves
-  --pgn arg              save games in PGN format to specified file name
-                         (if file exists it will be overwritten)
-  --pgn4 arg             save games in PGN4 format to specified file name
-                         (if file exists it will be overwritten)
+  --help                             print help message
+  --e1 arg                           first engine's file name
+  --e2 arg                           second engine's file name
+  --x1                               first engine uses xboard protocol. (UCI is
+                                     the default protocol.)
+  --x2                               second engine uses xboard protocol. (UCI
+                                     is the default protocol.)
+  --cores1 arg (=1)                  first engine number of cores
+  --cores2 arg (=1)                  second engine number of cores
+  --mem1 arg (=128)                  first engine memory usage (MB)
+  --mem2 arg (=128)                  second engine memory usage (MB)
+  --custom1 arg                      first engine custom command. e.g.
+                                     --custom1 "setoption name Style value
+                                     Risky"
+  --custom2 arg                      second engine custom command. Note:
+                                     --custom1 and --custom2 can be used more
+                                     than once in the command line.
+  --debug1                           enable debug for first engine
+  --debug2                           enable debug for second engine
+  --tc arg (=10000)                  time control base time (ms)
+  --inc arg (=100)                   time control increment (ms)
+  --fixed arg (=0)                   time control fixed time per move (ms).
+                                     This must be set to 0, unless engines
+                                     should simply use a fixed amount of time
+                                     per move.
+  --margin arg (=50)                 An engine loses on time if its clock goes
+                                     below zero for this amount of time (ms).
+  --games arg (=1000000)             total number of games to play
+  --threads arg (=1)                 number of concurrent games to run
+  --maxmoves arg (=1000)             maximum number of moves per game (total)
+                                     before adjudicating draw regardless of
+                                     scores
+  --earlywin                         adjudicate win result early if both
+                                     engines report mate scores
+  --earlydraw                        adjudicate draw result early if both
+                                     engine scores are in range (-drawscore <=
+                                     score <= drawscore) for a total of
+                                     drawmoves moves
+  --drawscore arg (=25)              drawscore (centipawns) value for
+                                     "earlydraw" setting
+  --drawmoves arg (=20)              drawmoves value for "earlydraw" setting
+  --fens arg                         file containing FENs for opening positions
+                                     (one FEN per line)
+  --variant arg                      variant name
+  --4pc                              enable 4 player chess (teams) mode
+  --legacy-clocks                    use legacy 2-clock system instead of
+                                     independent 4-player clocks
+  --continue                         continue match if error occurs (e.g.
+                                     illegal move)
+  --pmoves                           print out all moves
+  --pgn arg                          save games in PGN format to specified file
+                                     name
+                                     (if file exists it will be overwritten)
+  --pgn4 arg                         save games in PGN4 format to specified
+                                     file name
+                                     (if file exists it will be overwritten)
+  --sprt                             Enable SPRT test. Test stops when bounds
+                                     are reached.
+  --sprt-elo-model arg (=normalized) SPRT Elo model ('normalized' or
+                                     'logistic')
+  --sprt-elo0 arg (=0.0)             SPRT H0 (null hypothesis) Elo.
+  --sprt-elo1 arg (=5.0)             SPRT H1 (alternative hypothesis) Elo.
+  --sprt-alpha arg (=0.05)           SPRT alpha (type I error).
+  --sprt-beta arg (=0.05)            SPRT beta (type II error).
 ```

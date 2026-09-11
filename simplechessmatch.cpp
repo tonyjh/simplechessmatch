@@ -76,6 +76,19 @@ MatchManager::MatchManager(void)
    m_engines_shut_down = false;
    m_game_mgr = nullptr;
    m_thread = nullptr;
+
+   for (int i = 0; i < 5; i++) m_penta[i] = 0;
+
+   m_sprt_enabled = false;
+   m_sprt_test_finished = false;
+   m_sprt_llr = 0.0;
+   m_sprt_lower_bound = 0.0;
+   m_sprt_upper_bound = 0.0;
+   m_sprt_elo0 = 0.0;
+   m_sprt_elo1 = 0.0;
+   m_sprt_alpha = 0.0;
+   m_sprt_beta = 0.0;
+   m_sprt_decision = SPRT_NONE;
 }
 
 MatchManager::~MatchManager(void)
@@ -101,6 +114,7 @@ void MatchManager::main_loop(void)
 {
    string fen;
    bool swap_sides = false;
+   uint current_pair_id = 0;
 
 #if defined(WIN32) || defined(__linux__)
    // _kbhit is used to detect keypress
@@ -113,31 +127,42 @@ void MatchManager::main_loop(void)
 
    while (!match_completed())
    {
+      // 1. Join finished threads and record results
+      join_finished_threads();
+
+      // 2. Start new games
       for (uint i = 0; i < options.num_threads; i++)
       {
          if (!new_game_can_start())
             break;
-         if (m_game_mgr[i].m_thread_running == 0)
+         if (!m_game_mgr[i].m_thread_running && !m_thread[i].joinable())
          {
-            if (m_thread[i].joinable())
-               m_thread[i].join();
+            if (!swap_sides) {
+               if (get_next_fen(fen) == 0) {
+                  // Gracefully stop starting new games by pretending we hit our target game count.
+                  options.num_games_to_play = m_total_games_started;
+                  break;
+               }
+            }
 
-            if (!swap_sides)
-               if (get_next_fen(fen) == 0)
-                  return;
             m_game_mgr[i].m_fen = fen;
             m_game_mgr[i].m_swap_sides = swap_sides;
+            m_game_mgr[i].m_pair_id = current_pair_id;
+            if (swap_sides) current_pair_id++;
             swap_sides = !swap_sides;
 
-            // cout << "Starting thread " << i << ", swap: " << m_game_mgr[i].m_swap_sides << ", FEN: [" << m_game_mgr[i].m_fen << "]\n";
+            // cout << "Starting thread " << i << ", swap: " << m_game_mgr[i].m_swap_sides << ", pair ID: " << m_game_mgr[i].m_pair_id << " , FEN: [" << m_game_mgr[i].m_fen << "]\n";
             m_game_mgr[i].m_thread_running = true;
             m_thread[i] = thread(&GameManager::game_runner, &m_game_mgr[i]);
             m_total_games_started++;
          }
       }
+
+      // 3. Wait until a thread finishes
       while (!new_game_can_start() && !match_completed())
       {
          this_thread::sleep_for(200ms);
+         join_finished_threads();
          print_results();
          save_pgn();
          if (_kbhit())
@@ -147,16 +172,40 @@ void MatchManager::main_loop(void)
                return;
       }
    }
+
+   // Join any remaining finished threads
+   join_finished_threads();
+}
+
+void MatchManager::join_finished_threads(void)
+{
+   for (uint i = 0; i < options.num_threads; i++)
+   {
+      if (!m_game_mgr[i].m_thread_running && m_thread[i].joinable())
+      {
+         m_thread[i].join();
+         uint pid = m_game_mgr[i].m_pair_id;
+         if (!m_game_mgr[i].m_swap_sides) m_pair_records[pid].g1 = m_game_mgr[i].m_final_result;
+         else                             m_pair_records[pid].g2 = m_game_mgr[i].m_final_result;
+      }
+   }
+   update_penta_stats();
 }
 
 bool MatchManager::match_completed(void)
 {
-   return ((m_total_games_started >= options.num_games_to_play) && (num_games_in_progress() == 0));
+   if (m_sprt_enabled && m_sprt_test_finished)
+      return (num_games_in_progress() == 0);
+   else
+      return ((m_total_games_started >= options.num_games_to_play) && (num_games_in_progress() == 0));
 }
 
 bool MatchManager::new_game_can_start(void)
 {
-   return ((m_total_games_started < options.num_games_to_play) && (num_games_in_progress() < options.num_threads));
+   if (m_sprt_enabled && m_sprt_test_finished)
+      return false;
+   else
+      return ((m_total_games_started < options.num_games_to_play) && (num_games_in_progress() < options.num_threads));
 }
 
 uint MatchManager::num_games_in_progress(void)
@@ -174,6 +223,19 @@ int MatchManager::initialize(void)
    {
       cout << "Error: must specify two engines\n";
       return 0;
+   }
+
+   m_sprt_enabled = options.sprt_enabled;
+   if (m_sprt_enabled) {
+      m_sprt_elo0 = options.sprt_elo0;
+      m_sprt_elo1 = options.sprt_elo1;
+      m_sprt_alpha = options.sprt_alpha;
+      m_sprt_beta = options.sprt_beta;
+      m_sprt_lower_bound = log(m_sprt_beta / (1.0 - m_sprt_alpha));
+      m_sprt_upper_bound = log((1.0 - m_sprt_beta) / m_sprt_alpha);
+      cout << "SPRT test enabled with elo0=" << m_sprt_elo0 << ", elo1=" << m_sprt_elo1
+           << ", alpha=" << m_sprt_alpha << ", beta=" << m_sprt_beta << " (" << options.sprt_elo_model << ")\n";
+      cout << "SPRT bounds:[" << m_sprt_lower_bound << ", " << m_sprt_upper_bound << "]\n";
    }
 
    if (!options.fens_filename.empty())
@@ -205,6 +267,12 @@ int MatchManager::initialize(void)
    }
    else
       options.pgn4_format = options.fourplayerchess;
+
+   if (options.num_games_to_play % 2 != 0)
+      options.num_games_to_play++; // ensure complete pairs
+
+   int num_pairs = options.num_games_to_play / 2;
+   m_pair_records.resize(num_pairs);
 
    m_game_mgr = new GameManager[options.num_threads];
    m_thread = new thread[options.num_threads];
@@ -365,6 +433,8 @@ void MatchManager::print_results(void)
       cout << "  [time losses:" << engine1_losses_on_time << "/" << engine2_losses_on_time << "]";
 
    cout << "\n";
+
+   print_extended_results();
 }
 
 void MatchManager::print_final_results(void)
@@ -495,7 +565,109 @@ void MatchManager::print_thread_results(void)
            << setw(nw) << fixed << setprecision(0) << nps1
            << setw(nw) << fixed << setprecision(0) << nps2 << "\n";
    }
-   cout << "\n";
+}
+
+void MatchManager::print_extended_results(void)
+{
+   uint engine1_wins = 0, engine2_wins = 0, draws = 0;
+   uint illegal_move_games = 0, engine1_losses_on_time = 0, engine2_losses_on_time = 0;
+
+   for (uint i = 0; i < options.num_threads; i++)
+   {
+      engine1_wins += m_game_mgr[i].m_engine1_wins;
+      engine2_wins += m_game_mgr[i].m_engine2_wins;
+      draws += m_game_mgr[i].m_draws;
+      illegal_move_games += m_game_mgr[i].m_illegal_move_games;
+      engine1_losses_on_time += m_game_mgr[i].m_engine1_losses_on_time;
+      engine2_losses_on_time += m_game_mgr[i].m_engine2_losses_on_time;
+   }
+
+   int N_games = engine1_wins + engine2_wins + draws;
+   int N_pairs = m_penta[0] + m_penta[1] + m_penta[2] + m_penta[3] + m_penta[4];
+
+   stringstream ss_output;
+
+   if (N_pairs == 0) {
+      ss_output << "No game pairs completed yet." << endl;
+   } else {
+      double p[5] = {0.0};
+      for (int k = 0; k < 5; ++k) p[k] = (double)m_penta[k] / N_pairs;
+
+      double score = 0.0;
+      for (int k = 0; k < 5; ++k) score += p[k] * (k * 0.25);
+
+      double var_pair_avg = 0.0;
+      for (int k = 0; k < 5; ++k) {
+         double diff = (k * 0.25) - score;
+         var_pair_avg += p[k] * diff * diff;
+      }
+
+      ss_output << fixed << setprecision(2);
+
+      if (score <= 1e-9 || score >= 1.0 - 1e-9) {
+         ss_output << "Elo   | " << (score > 0.5 ? "+inf" : "-inf") << endl;
+         ss_output << "nElo  | " << (score > 0.5 ? "+inf" : "-inf") << endl;
+      } else {
+         double std_error_of_mean_score = sqrt(var_pair_avg / N_pairs);
+
+         // 1. Classical / Logistic Elo (Exact bounds calculation)
+         auto to_elo = [](double s) {
+             if (s < 1e-5) s = 1e-5;
+             if (s > 1.0 - 1e-5) s = 1.0 - 1e-5;
+             return -400.0 * log10(1.0 / s - 1.0);
+         };
+         double elo_diff = to_elo(score);
+         double mu_min = score - 1.96 * std_error_of_mean_score;
+         double mu_max = score + 1.96 * std_error_of_mean_score;
+         double elo_margin = (to_elo(mu_max) - to_elo(mu_min)) / 2.0;
+
+         // 2. Normalized Elo (nElo)
+         double sigma_pg = sqrt(2.0 * var_pair_avg);
+         double nElo = 0.0, margin_nElo = 0.0;
+         if (sigma_pg > 1e-9) {
+            double nt = (score - 0.5) / sigma_pg;
+            nElo = nt * (800.0 / log(10.0));
+            double std_err_nt = std_error_of_mean_score / sigma_pg;
+            margin_nElo = 1.96 * std_err_nt * (800.0 / log(10.0));
+         }
+
+         ss_output << "Elo   | " << elo_diff << " +- " << elo_margin << " (95%)" << endl;
+         ss_output << "nElo  | " << nElo << " +- " << margin_nElo << " (95%)" << endl;
+      }
+
+      if (m_sprt_enabled) {
+         stringstream tc_ss;
+         if (options.tc_fixed_time_move_ms > 0)
+            tc_ss << fixed << setprecision(2) << (float)options.tc_fixed_time_move_ms / 1000.0 << "s";
+         else
+            tc_ss << options.tc_ms / 1000 << "+" << fixed << setprecision(2) << (float)options.tc_inc_ms / 1000.0;
+
+         string thread_str = "Th=" + to_string(options.num_cores_1) + (options.num_cores_1 == options.num_cores_2 ? "" : "/" + to_string(options.num_cores_2));
+         string hash_str = "Hash=" + to_string(options.mem_size_1) + "MB" + (options.mem_size_1 == options.mem_size_2 ? "" : "/" + to_string(options.mem_size_2) + "MB");
+
+         ss_output << "SPRT  | " << tc_ss.str() << " " << thread_str << " " << hash_str << " Conc=" << options.num_threads << endl;
+         ss_output << "LLR   | " << m_sprt_llr << " (" << m_sprt_lower_bound << ", " << m_sprt_upper_bound 
+                   << ") [" << m_sprt_elo0 << ", " << m_sprt_elo1 << " " << options.sprt_elo_model << "]" << endl;
+      }
+
+      ss_output << "Games | N: " << N_games << " W: " << engine1_wins << " L: " << engine2_wins << " D: " << draws << " Completed Pairs: " << N_pairs << endl;
+      ss_output << "Penta | " << m_penta[0] << " " << m_penta[1] << " " << m_penta[2] << " " << m_penta[3] << " " << m_penta[4] << endl;
+
+      stringstream ss;
+      if (illegal_move_games != 0) ss << " [Illegal Moves: " << illegal_move_games << "]";
+      if (engine1_losses_on_time != 0 || engine2_losses_on_time != 0) ss << " [Timeouts: " << engine1_losses_on_time << " / " << engine2_losses_on_time << "]";
+      if (ss.str().length() > 0) ss_output << "Info  |" << ss.str() << endl;
+
+      if (m_sprt_enabled && m_sprt_test_finished) {
+         ss_output << "\nSPRT test finished: ";
+         if (m_sprt_decision == SPRT_H1) ss_output << "H1 accepted (Engine 1 is stronger)." << endl;
+         else if (m_sprt_decision == SPRT_H0) ss_output << "H0 accepted (elo is within bounds)." << endl;
+      }
+   }
+
+   string output_str = ss_output.str();
+
+   cout << output_str;
 }
 
 int MatchManager::get_next_fen(string &fen)
@@ -527,6 +699,165 @@ void MatchManager::save_pgn(void)
          m_pgn_file << m_game_mgr[i].m_pgn;
       }
    }
+}
+
+void MatchManager::update_penta_stats(void)
+{
+   for (int k = 0; k < 5; k++) m_penta[k] = 0;
+   int completed_pairs = 0;
+
+   for (uint pid = 0; pid < m_pair_records.size(); pid++) {
+      game_result g1 = m_pair_records[pid].g1;
+      game_result g2 = m_pair_records[pid].g2;
+
+      bool g1_done = (g1 == WHITE_WIN || g1 == BLACK_WIN || g1 == DRAW);
+      bool g2_done = (g2 == WHITE_WIN || g2 == BLACK_WIN || g2 == DRAW);
+
+      if (g1_done && g2_done) {
+         double e1_score = 0.0;
+         if (g1 == WHITE_WIN) e1_score += 1.0;
+         else if (g1 == DRAW) e1_score += 0.5;
+
+         if (g2 == BLACK_WIN) e1_score += 1.0;
+         else if (g2 == DRAW) e1_score += 0.5;
+
+         if      (e1_score == 0.0) m_penta[0]++;
+         else if (e1_score == 0.5) m_penta[1]++;
+         else if (e1_score == 1.0) m_penta[2]++;
+         else if (e1_score == 1.5) m_penta[3]++;
+         else if (e1_score == 2.0) m_penta[4]++;
+
+         completed_pairs++;
+      }
+   }
+
+   if (m_sprt_enabled && !m_sprt_test_finished && completed_pairs > 0) {
+      double R[5];
+      for (int k = 0; k < 5; ++k) {
+         R[k] = m_penta[k];
+         if (R[k] == 0.0) R[k] = 1e-3; // Fishtest epsilon
+      }
+      
+      double N = 0.0;
+      for (int k = 0; k < 5; ++k) N += R[k];
+      
+      double p_hat[5];
+      for (int k = 0; k < 5; ++k) p_hat[k] = R[k] / N;
+
+      if (options.sprt_elo_model == "normalized") {
+         m_sprt_llr = N * LLR_normalized(p_hat, m_sprt_elo0, m_sprt_elo1);
+      } else {
+         double s0 = 1.0 / (1.0 + pow(10.0, -m_sprt_elo0 / 400.0));
+         double s1 = 1.0 / (1.0 + pow(10.0, -m_sprt_elo1 / 400.0));
+         m_sprt_llr = N * LLR_logistic(p_hat, s0, s1);
+      }
+
+      if (m_sprt_llr >= m_sprt_upper_bound) {
+         m_sprt_test_finished = true;
+         m_sprt_decision = SPRT_H1;
+      } else if (m_sprt_llr <= m_sprt_lower_bound) {
+         m_sprt_test_finished = true;
+         m_sprt_decision = SPRT_H0;
+      }
+   }
+}
+
+// -------------------------------------------------------------------------
+// FISHTEST MLE STATISTICAL FUNCTIONS
+// -------------------------------------------------------------------------
+
+double MatchManager::secular(const double a[5], const double p[5]) {
+   double v = 1e9, w = -1e9;
+   for (int k = 0; k < 5; ++k) {
+      if (p[k] > 0.0) {
+         if (a[k] < v) v = a[k];
+         if (a[k] > w) w = a[k];
+      }
+   }
+   if (v * w >= 0.0) return 0.0; 
+   
+   double L = -1.0 / w + 1e-9;
+   double U = -1.0 / v - 1e-9;
+   
+   double x = 0.0;
+   for (int iter = 0; iter < 100; ++iter) {
+      x = 0.5 * (L + U);
+      if (x == L || x == U) break;
+      double f = 0.0;
+      for (int k = 0; k < 5; ++k) {
+         f += p[k] * a[k] / (1.0 + x * a[k]);
+      }
+      if (f > 0.0) L = x;
+      else U = x;
+   }
+   return x;
+}
+
+void MatchManager::MLE_expected(const double a[5], const double p[5], double s, double p_MLE[5]) {
+   double a_shifted[5];
+   for (int k = 0; k < 5; ++k) a_shifted[k] = a[k] - s;
+   double x = secular(a_shifted, p);
+   for (int k = 0; k < 5; ++k) p_MLE[k] = p[k] / (1.0 + x * a_shifted[k]);
+}
+
+void MatchManager::MLE_t_value(const double a[5], const double p_hat[5], double ref, double t_target, double p_MLE[5]) {
+   for (int k = 0; k < 5; ++k) p_MLE[k] = 0.2; 
+   
+   for (int iter = 0; iter < 10; ++iter) {
+      double p_prev[5];
+      for (int k = 0; k < 5; ++k) p_prev[k] = p_MLE[k];
+      
+      double mu = 0.0, var = 0.0;
+      for (int k = 0; k < 5; ++k) mu += p_MLE[k] * a[k];
+      for (int k = 0; k < 5; ++k) var += p_MLE[k] * (a[k] - mu) * (a[k] - mu);
+      double sigma = sqrt(var);
+      
+      double a_shifted[5];
+      for (int k = 0; k < 5; ++k) {
+         double z = (mu - a[k]) / sigma;
+         a_shifted[k] = a[k] - ref - t_target * sigma * (1.0 + z * z) / 2.0;
+      }
+      
+      double x = secular(a_shifted, p_hat);
+      
+      double max_diff = 0.0;
+      for (int k = 0; k < 5; ++k) {
+         p_MLE[k] = p_hat[k] / (1.0 + x * a_shifted[k]);
+         double diff = std::abs(p_prev[k] - p_MLE[k]);
+         if (diff > max_diff) max_diff = diff;
+      }
+      if (max_diff < 1e-9) break;
+   }
+}
+
+double MatchManager::LLR_logistic(const double p_hat[5], double s0, double s1) {
+   double a[5] = {0.0, 0.25, 0.5, 0.75, 1.0};
+   double p_MLE0[5], p_MLE1[5];
+   MLE_expected(a, p_hat, s0, p_MLE0);
+   MLE_expected(a, p_hat, s1, p_MLE1);
+   
+   double llr = 0.0;
+   for (int k = 0; k < 5; ++k) {
+      llr += p_hat[k] * log(p_MLE1[k] / p_MLE0[k]);
+   }
+   return llr;
+}
+
+double MatchManager::LLR_normalized(const double p_hat[5], double nelo0, double nelo1) {
+   double nelo_divided_by_nt = 800.0 / log(10.0);
+   double t0 = (nelo0 / nelo_divided_by_nt) * sqrt(2.0);
+   double t1 = (nelo1 / nelo_divided_by_nt) * sqrt(2.0);
+   
+   double a[5] = {0.0, 0.25, 0.5, 0.75, 1.0};
+   double p_MLE0[5], p_MLE1[5];
+   MLE_t_value(a, p_hat, 0.5, t0, p_MLE0);
+   MLE_t_value(a, p_hat, 0.5, t1, p_MLE1);
+   
+   double llr = 0.0;
+   for (int k = 0; k < 5; ++k) {
+      llr += p_hat[k] * log(p_MLE1[k] / p_MLE0[k]);
+   }
+   return llr;
 }
 
 int parse_cmd_line_options(int argc, char* argv[])
@@ -567,6 +898,12 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("pmoves",     "print out all moves")
          ("pgn",        po::value<string>(&options.pgn_filename), "save games in PGN format to specified file name\n(if file exists it will be overwritten)")
          ("pgn4",       po::value<string>(&options.pgn4_filename), "save games in PGN4 format to specified file name\n(if file exists it will be overwritten)")
+         ("sprt",       "Enable SPRT test. Test stops when bounds are reached.")
+         ("sprt-elo-model", po::value<string>(&options.sprt_elo_model)->default_value("normalized"), "SPRT Elo model ('normalized' or 'logistic')")
+         ("sprt-elo0",  po::value<double>(&options.sprt_elo0)->default_value(0.0, "0.0"), "SPRT H0 (null hypothesis) Elo.")
+         ("sprt-elo1",  po::value<double>(&options.sprt_elo1)->default_value(5.0, "5.0"), "SPRT H1 (alternative hypothesis) Elo.")
+         ("sprt-alpha", po::value<double>(&options.sprt_alpha)->default_value(0.05, "0.05"), "SPRT alpha (type I error).")
+         ("sprt-beta",  po::value<double>(&options.sprt_beta)->default_value(0.05, "0.05"), "SPRT beta (type II error).")
          ;
 
       po::variables_map var_map;
@@ -589,6 +926,13 @@ int parse_cmd_line_options(int argc, char* argv[])
       options.legacy_clocks = (var_map.count("legacy-clocks") != 0);
       options.early_win = (var_map.count("earlywin") != 0);
       options.early_draw = (var_map.count("earlydraw") != 0);
+
+      options.sprt_enabled = (var_map.count("sprt") != 0);
+      if (options.sprt_elo_model != "normalized" && options.sprt_elo_model != "logistic")
+      {
+         cerr << "error: --sprt-elo-model must be 'normalized' or 'logistic'\n";
+         return 0;
+      }
    }
    catch (exception &e)
    {
