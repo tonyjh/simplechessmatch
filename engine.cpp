@@ -412,13 +412,11 @@ void Engine::check_engine_output(void)
 
          if ((line_lower.find("illegal move") != string::npos) || (line_lower.find("invalid move") != string::npos))
          {
-            cout << "Illegal move reported by " << m_name << "\n";
             m_result = ERROR_ILLEGAL_MOVE;
          }
          else if ((line_lower.find("invalid fen", 0) != string::npos) || (line_lower.find("invalid position", 0) != string::npos) ||
                   (line_lower.find("illegal fen", 0) != string::npos) || (line_lower.find("illegal position", 0) != string::npos))
          {
-            cout << "Invalid position reported by " << m_name << "\n";
             m_result = ERROR_INVALID_POSITION;
          }
          // 4pchess (https://github.com/obryanlouis/4pchess) uses "RY won" / "BG won" / "Stalemate".
@@ -443,12 +441,10 @@ void Engine::check_engine_output(void)
       if ((m_line.rfind("Illegal move:", 0) == 0) ||
           (m_line.rfind("Error (unknown command): " + m_opponent_move) == 0))
       {
-         cout << "Illegal move reported by " << m_name << "\n";
          m_result = ERROR_ILLEGAL_MOVE;
       }
       else if (m_line.rfind("tellusererror Illegal position", 0) == 0)
       {
-         cout << "Invalid position reported by " << m_name << "\n";
          m_result = ERROR_INVALID_POSITION;
       }
       else if (m_line.rfind("resign", 0) == 0)
@@ -804,8 +800,7 @@ player_color get_color_to_move_from_fen(const string &fen)
    if (fen.find(" b ") != string::npos)
       return BLACK;
 
-   cout << "Warning: couldn't get color to move from FEN: " << fen << "\n";
-   return WHITE;
+   return NO_COLOR;
 }
 
 player_color_4pc get_color_4pc_to_move_from_fen(const string &fen)
@@ -827,8 +822,7 @@ player_color_4pc get_color_4pc_to_move_from_fen(const string &fen)
    if (fen.find(" b ") != string::npos)
       return BLUE;
 
-   cout << "Warning: couldn't get 4PC color to move from FEN: " << fen << "\n";
-   return RED;
+   return NO_COLOR_4PC;
 }
 
 void convert_to_lowercase(const string &input_str, string &output_str)

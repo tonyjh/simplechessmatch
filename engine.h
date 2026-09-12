@@ -37,7 +37,8 @@ enum game_result
 enum player_color
 {
    WHITE,
-   BLACK
+   BLACK,
+   NO_COLOR
 };
 
 enum player_color_4pc
@@ -50,6 +51,7 @@ enum player_color_4pc
    YELLOW = PLAYER3,
    PLAYER4,
    GREEN = PLAYER4,
+   NO_COLOR_4PC
 };
 
 enum engine_number
@@ -154,6 +156,7 @@ struct options_info
    vector<string> custom_commands_2;
    bool debug_1;
    bool debug_2;
+   bool simple_output;
 
    bool print_moves;
    bool continue_on_error;

@@ -80,6 +80,7 @@ To compile, Boost library must be installed.
   --pgn4 arg                         save games in PGN4 format to specified
                                      file name
                                      (if file exists it will be overwritten)
+  --simple                           simple line-by-line output
   --sprt                             Enable SPRT test. Test stops when bounds
                                      are reached.
   --sprt-elo-model arg (=normalized) SPRT Elo model ('normalized' or

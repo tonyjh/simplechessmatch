@@ -1,6 +1,10 @@
+#pragma once
+
 #include "engine.h"
 #include <thread>
 #include <atomic>
+
+class MatchManager;
 
 void convert_move_to_PGN4_format(string &move);
 void convert_move_to_standard_engine_format(string &move);
@@ -10,17 +14,17 @@ class GameManager
 public:
    Engine m_engine1;
    Engine m_engine2;
-   uint m_engine1_wins;
-   uint m_engine2_wins;
+   uint m_wins[2];
    uint m_draws;
-   uint m_engine1_losses_on_time;
-   uint m_engine2_losses_on_time;
+   uint m_losses_on_time[2];
    uint m_illegal_move_games;
    uint64_t m_engine_total_depth[2];
    uint64_t m_engine_total_sel_depth[2];
    uint64_t m_engine_total_time_ms[2];
    uint64_t m_engine_total_nodes[2];
    uint64_t m_engine_num_moves[2];
+   uint64_t m_total_plies;
+   uint64_t m_total_game_time_ms;
    atomic<bool> m_thread_running;
    bool m_swap_sides;
    bool m_error;
@@ -51,6 +55,7 @@ public:
    ~GameManager(void);
    void game_runner(void);
    bool is_engine_unresponsive(void);
+   MatchManager* m_match_mgr;
 
 private:
    game_result run_engine_game(chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms);

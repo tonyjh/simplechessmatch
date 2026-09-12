@@ -3,8 +3,10 @@
 #include <fstream>
 #include <math.h>
 #include <iomanip>
+#include <mutex>
 #ifdef WIN32
 #include <conio.h>
+#include <windows.h>
 #else
 #include <signal.h>
 #endif
@@ -13,6 +15,37 @@
 #endif
 
 #define MAX_THREADS 32
+
+struct AggregatedResults {
+   uint wins[2] = {};
+   uint draws = 0;
+   uint total_games = 0;
+   uint illegal_move_games = 0;
+   uint losses_on_time[2] = {};
+   uint64_t total_depth[2] = {};
+   uint64_t total_sel_depth[2] = {};
+   uint64_t total_time_ms[2] = {};
+   uint64_t total_nodes[2] = {};
+   uint64_t total_moves[2] = {};
+   uint64_t total_plies = 0;
+   uint64_t total_game_time_ms = 0;
+   double engine_score[2] = {};
+   double avg_depth[2] = {};
+   double avg_sel_depth[2] = {};
+   double avg_time_per_move[2] = {};
+   double nps[2] = {};
+   double avg_plies_per_game = 0.0;
+   double avg_game_duration = 0.0;
+};
+
+struct EloInfo {
+   double elo_diff = 0.0;
+   double elo_margin = 0.0;
+   double nElo_diff = 0.0;
+   double nElo_margin = 0.0;
+   string elo_str;
+   string nElo_str;
+};
 
 struct PairRecord {
    game_result g1 = UNFINISHED;
@@ -45,6 +78,10 @@ private:
    int m_penta[5];
    void update_penta_stats(void);
 
+   // Error messages
+   std::mutex m_output_mutex;
+   std::vector<std::string> m_error_messages;
+
    // SPRT related members
    bool m_sprt_enabled;
    double m_sprt_elo0;
@@ -63,6 +100,8 @@ private:
    };
    SPRT_Decision m_sprt_decision;
 
+   int m_lines_printed;
+
 public:
    MatchManager(void);
    ~MatchManager(void);
@@ -72,10 +111,13 @@ public:
    int load_all_engines(void);
    void set_engine_options(Engine *engine);
    void send_engine_custom_commands(Engine *engine);
+   void log_error_message(const std::string& msg);
+   void reset_cursor(void);
    void print_results(void);
+   void print_error_messages(bool all);
    void print_final_results(void);
    void print_thread_results(void);
-   void print_extended_results(void);
+   void print_extended_results(AggregatedResults &r);
    void save_pgn(void);
    void shut_down_all_engines(void);
 
@@ -85,6 +127,10 @@ private:
    uint num_games_in_progress(void);
    int get_next_fen(string &fen);
    void join_finished_threads(void);
+   bool simple_output_mode(void);
+
+   EloInfo calculate_elo(void);
+   AggregatedResults aggregate_results(void);
 
    // Fishtest Statistical LLR Functions
    double secular(const double a[5], const double p[5]);

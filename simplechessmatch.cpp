@@ -23,6 +23,10 @@ int main(int argc, char* argv[])
 
 #ifdef WIN32
    SetConsoleCtrlHandler(ctrl_c_handler, TRUE);
+   HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+   DWORD mode;
+   if (GetConsoleMode(hConsole, &mode))
+      SetConsoleMode(hConsole, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 #else
    struct sigaction sig_handler;
    sig_handler.sa_handler = ctrl_c_handler;
@@ -89,6 +93,7 @@ MatchManager::MatchManager(void)
    m_sprt_alpha = 0.0;
    m_sprt_beta = 0.0;
    m_sprt_decision = SPRT_NONE;
+   m_lines_printed = 0;
 }
 
 MatchManager::~MatchManager(void)
@@ -277,6 +282,9 @@ int MatchManager::initialize(void)
    m_game_mgr = new GameManager[options.num_threads];
    m_thread = new thread[options.num_threads];
 
+   for (uint i = 0; i < options.num_threads; i++)
+      m_game_mgr[i].m_match_mgr = this;
+
    if (options.tc_fixed_time_move_ms > 0)
       m_tc_str = ((options.tc_fixed_time_move_ms % 1000) == 0) ? to_string(options.tc_fixed_time_move_ms / 1000) + "s fixed" :
                                                                to_string(options.tc_fixed_time_move_ms) + "ms fixed";
@@ -391,11 +399,101 @@ void MatchManager::send_engine_custom_commands(Engine *engine)
    }
 }
 
+void MatchManager::log_error_message(const std::string& msg)
+{
+   lock_guard<mutex> lock(m_output_mutex);
+   if (simple_output_mode())
+      cout << msg;
+   else
+      m_error_messages.push_back(msg);
+}
+
+void MatchManager::print_error_messages(bool all)
+{
+   lock_guard<mutex> lock(m_output_mutex);
+   if (m_error_messages.size() > 0) {
+      cout << (all ? "Errors/Events:\n" : "Recent Errors/Events:\n");
+      m_lines_printed++;
+      size_t start = (all || m_error_messages.size() <= 5) ? (0) : (m_error_messages.size() - 5);
+      for (size_t i = start; i < m_error_messages.size(); i++) {
+         cout << m_error_messages[i];
+         m_lines_printed++;
+      }
+   }
+}
+
+void MatchManager::reset_cursor(void)
+{
+   // Move cursor up to overwrite previous in-place output
+   static bool cursor_saved = false;
+   static int saved_row = -1;
+   if (!cursor_saved) {
+#ifdef WIN32
+      CONSOLE_SCREEN_BUFFER_INFO csbi;
+      GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+      saved_row = csbi.dwCursorPosition.Y;
+#endif
+      m_lines_printed = 0;
+      cursor_saved = true;
+   } else {
+#ifdef WIN32
+      CONSOLE_SCREEN_BUFFER_INFO csbi;
+      GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+      int lines_up = csbi.dwCursorPosition.Y - saved_row;
+      if (lines_up > 0)
+         cout << "\033[" << lines_up << "A";
+      cout << "\033[J";
+#else
+      if (m_lines_printed > 0)
+         cout << "\033[" << m_lines_printed << "A";
+      cout << "\033[J";
+#endif
+      m_lines_printed = 0;
+   }
+}
+
+AggregatedResults MatchManager::aggregate_results(void)
+{
+   AggregatedResults r;
+   for (uint i = 0; i < options.num_threads; i++) {
+      r.wins[FIRST] += m_game_mgr[i].m_wins[FIRST];
+      r.wins[SECOND] += m_game_mgr[i].m_wins[SECOND];
+      r.draws += m_game_mgr[i].m_draws;
+      r.illegal_move_games += m_game_mgr[i].m_illegal_move_games;
+      r.losses_on_time[FIRST] += m_game_mgr[i].m_losses_on_time[FIRST];
+      r.losses_on_time[SECOND] += m_game_mgr[i].m_losses_on_time[SECOND];
+      r.total_depth[FIRST] += m_game_mgr[i].m_engine_total_depth[FIRST];
+      r.total_depth[SECOND] += m_game_mgr[i].m_engine_total_depth[SECOND];
+      r.total_sel_depth[FIRST] += m_game_mgr[i].m_engine_total_sel_depth[FIRST];
+      r.total_sel_depth[SECOND] += m_game_mgr[i].m_engine_total_sel_depth[SECOND];
+      r.total_time_ms[FIRST] += m_game_mgr[i].m_engine_total_time_ms[FIRST];
+      r.total_time_ms[SECOND] += m_game_mgr[i].m_engine_total_time_ms[SECOND];
+      r.total_nodes[FIRST] += m_game_mgr[i].m_engine_total_nodes[FIRST];
+      r.total_nodes[SECOND] += m_game_mgr[i].m_engine_total_nodes[SECOND];
+      r.total_moves[FIRST] += m_game_mgr[i].m_engine_num_moves[FIRST];
+      r.total_moves[SECOND] += m_game_mgr[i].m_engine_num_moves[SECOND];
+      r.total_plies += m_game_mgr[i].m_total_plies;
+      r.total_game_time_ms += m_game_mgr[i].m_total_game_time_ms;
+   }
+
+   r.total_games = r.wins[FIRST] + r.wins[SECOND] + r.draws;
+
+   for (uint e = FIRST; e <= SECOND; e++) {
+      r.avg_depth[e] = r.total_moves[e] > 0 ? (double)r.total_depth[e] / (double)r.total_moves[e] : 0.0;
+      r.avg_sel_depth[e] = r.total_moves[e] > 0 ? (double)r.total_sel_depth[e] / (double)r.total_moves[e] : 0.0;
+      r.avg_time_per_move[e] = r.total_moves[e] > 0 ? (double)r.total_time_ms[e] / (double)r.total_moves[e] : 0.0;
+      r.nps[e] = r.total_time_ms[e] > 0 ? (double)r.total_nodes[e] * 1000.0 / (double)r.total_time_ms[e] : 0.0;
+      r.engine_score[e] = (r.total_games > 0) ? ((double)r.wins[e] + (double)r.draws / 2.0) / (double)r.total_games : 0.5;
+   }
+
+   r.avg_game_duration = (r.total_games > 0) ? ((double)r.total_game_time_ms / 1000.0 / (double)r.total_games) : 0.0;
+   r.avg_plies_per_game = (r.total_games > 0) ? (double)r.total_plies / (double)r.total_games : 0.0;
+
+   return r;
+}
+
 void MatchManager::print_results(void)
 {
-   uint engine1_wins, engine2_wins, draws, illegal_move_games, engine1_losses_on_time, engine2_losses_on_time;
-   engine1_wins = engine2_wins = draws = illegal_move_games = engine1_losses_on_time = engine2_losses_on_time = 0;
-
    // don't print results again unless the total number of games completed has changed.
    static int last_total_games_completed = 0;
    int total_games_completed = m_total_games_started - num_games_in_progress();
@@ -403,81 +501,109 @@ void MatchManager::print_results(void)
       return;
    last_total_games_completed = total_games_completed;
 
-   for (uint i = 0; i < options.num_threads; i++)
-   {
-      engine1_wins += m_game_mgr[i].m_engine1_wins;
-      engine2_wins += m_game_mgr[i].m_engine2_wins;
-      draws += m_game_mgr[i].m_draws;
-      illegal_move_games += m_game_mgr[i].m_illegal_move_games;
-      engine1_losses_on_time += m_game_mgr[i].m_engine1_losses_on_time;
-      engine2_losses_on_time += m_game_mgr[i].m_engine2_losses_on_time;
-   }
+   AggregatedResults r = aggregate_results();
 
-   int total = engine1_wins + engine2_wins + draws;
-   double engine1_score = (total > 0) ? ((double)engine1_wins + (double)draws / 2.0) / (double)total : 0.5;
-   double engine2_score = (total > 0) ? ((double)engine2_wins + (double)draws / 2.0) / (double)total : 0.5;
-   double elo_diff = (total > 0) ? log10(1.0 / engine2_score - 1.0) * 400.0 : 0.0;
+   if (!simple_output_mode())
+      reset_cursor();
+
+   double elo_diff = (r.total_games > 0) ? log10(1.0 / r.engine_score[SECOND] - 1.0) * 400.0 : 0.0;
    string name1 = filename_from_path(options.engine_file_name_1);
    string name2 = filename_from_path(options.engine_file_name_2);
 
    cout << "[games " << total_games_completed << "/" << options.num_games_to_play << "]  "
         << "[" << name1 << " vs " << name2 << "]  "
         << "[" << m_tc_str << "]  "
-        << "W1:" << engine1_wins << "  W2:" << engine2_wins << "  D:" << draws
-        << "  " << fixed << setprecision(1) << 100.0 * engine1_score << "%"
-        << "  elo " << showpos << setprecision(2) << elo_diff << noshowpos;
+        << "W1:" << r.wins[FIRST] << "  W2:" << r.wins[SECOND] << "  D:" << r.draws
+        << "  " << fixed << setprecision(1) << 100.0 * r.engine_score[FIRST] << "%"
+        << "  Elo " << showpos << setprecision(2) << elo_diff << noshowpos;
 
-   if (illegal_move_games != 0)
-      cout << "  [illegal:" << illegal_move_games << "]";
-   if ((engine1_losses_on_time != 0) || (engine2_losses_on_time != 0))
-      cout << "  [time losses:" << engine1_losses_on_time << "/" << engine2_losses_on_time << "]";
+   if (r.illegal_move_games != 0)
+      cout << "  [illegal:" << r.illegal_move_games << "]";
+   if ((r.losses_on_time[FIRST] != 0) || (r.losses_on_time[SECOND] != 0))
+      cout << "  [time losses:" << r.losses_on_time[FIRST] << "/" << r.losses_on_time[SECOND] << "]";
 
    cout << "\n";
+   m_lines_printed++;
 
-   print_extended_results();
+   if (!options.simple_output)
+      print_extended_results(r);
+
+   print_error_messages(false);
+}
+
+void MatchManager::print_extended_results(AggregatedResults &r)
+{
+   int N_games = r.wins[FIRST] + r.wins[SECOND] + r.draws;
+   int N_pairs = m_penta[0] + m_penta[1] + m_penta[2] + m_penta[3] + m_penta[4];
+
+   stringstream ss_output;
+
+   if (N_pairs > 0) {
+      EloInfo elo_info = calculate_elo();
+
+      ss_output << "Elo   | " << elo_info.elo_str << endl;
+      ss_output << "nElo  | " << elo_info.nElo_str << endl;
+      m_lines_printed += 2;
+
+      if (m_sprt_enabled) {
+         stringstream tc_ss;
+         if (options.tc_fixed_time_move_ms > 0)
+            tc_ss << fixed << setprecision(2) << (float)options.tc_fixed_time_move_ms / 1000.0 << "s";
+         else
+            tc_ss << options.tc_ms / 1000 << "+" << fixed << setprecision(2) << (float)options.tc_inc_ms / 1000.0;
+
+         string thread_str = "Th=" + to_string(options.num_cores_1) + (options.num_cores_1 == options.num_cores_2 ? "" : "/" + to_string(options.num_cores_2));
+         string hash_str = "Hash=" + to_string(options.mem_size_1) + "MB" + (options.mem_size_1 == options.mem_size_2 ? "" : "/" + to_string(options.mem_size_2) + "MB");
+
+         ss_output << "SPRT  | " << tc_ss.str() << " " << thread_str << " " << hash_str << " Conc=" << options.num_threads << endl;
+         ss_output << "LLR   | " << m_sprt_llr << " (" << m_sprt_lower_bound << ", " << m_sprt_upper_bound 
+                   << ") [" << m_sprt_elo0 << ", " << m_sprt_elo1 << " " << options.sprt_elo_model << "]" << endl;
+         m_lines_printed += 2;
+      }
+   }
+
+   ss_output << "Games | N:" << N_games << " W:" << r.wins[FIRST] << " L:" << r.wins[SECOND] << " D:" << r.draws << " Pairs:" << N_pairs << endl;
+   ss_output << "Penta | " << m_penta[0] << " " << m_penta[1] << " " << m_penta[2] << " " << m_penta[3] << " " << m_penta[4] << endl;
+
+   ss_output << "Stats | avg_plies=" << fixed << setprecision(1) << r.avg_plies_per_game << " avg_dur=" << r.avg_game_duration << "s" << endl;
+   ss_output << "   E1 | avg_d=" << fixed << setprecision(2) << r.avg_depth[FIRST]
+             << " avg_sd=" << fixed << setprecision(2) << r.avg_sel_depth[FIRST]
+             << " t/m=" << fixed << setprecision(0) << r.avg_time_per_move[FIRST]
+             << "ms nps=" << fixed << setprecision(0) << r.nps[FIRST] << endl;
+   ss_output << "   E2 | avg_d=" << fixed << setprecision(2) << r.avg_depth[SECOND]
+             << " avg_sd=" << fixed << setprecision(2) << r.avg_sel_depth[SECOND]
+             << " t/m=" << fixed << setprecision(0) << r.avg_time_per_move[SECOND]
+             << "ms nps=" << fixed << setprecision(0) << r.nps[SECOND] << endl;
+   m_lines_printed += 5;
+
+   if (m_sprt_enabled && m_sprt_test_finished) {
+      ss_output << "\nSPRT test finished: ";
+      m_lines_printed++;
+      if (m_sprt_decision == SPRT_H1) {
+         ss_output << "H1 accepted (Engine 1 is stronger)." << endl;
+         m_lines_printed++;
+      }
+      else if (m_sprt_decision == SPRT_H0) {
+         ss_output << "H0 accepted (elo is within bounds)." << endl;
+         m_lines_printed++;
+      }
+   }
+
+   cout << ss_output.str();
 }
 
 void MatchManager::print_final_results(void)
 {
-   uint engine1_wins, engine2_wins, draws, illegal_move_games, engine1_losses_on_time, engine2_losses_on_time;
-   engine1_wins = engine2_wins = draws = illegal_move_games = engine1_losses_on_time = engine2_losses_on_time = 0;
+   AggregatedResults r = aggregate_results();
+   EloInfo elo_info = calculate_elo();
 
-   uint64_t total_depth1 = 0, total_depth2 = 0;
-   uint64_t total_sel_depth1 = 0, total_sel_depth2 = 0;
-   uint64_t total_time1 = 0, total_time2 = 0;
-   uint64_t total_nodes1 = 0, total_nodes2 = 0;
-   uint64_t total_moves1 = 0, total_moves2 = 0;
-
-   for (uint i = 0; i < options.num_threads; i++)
-   {
-      engine1_wins += m_game_mgr[i].m_engine1_wins;
-      engine2_wins += m_game_mgr[i].m_engine2_wins;
-      draws += m_game_mgr[i].m_draws;
-      illegal_move_games += m_game_mgr[i].m_illegal_move_games;
-      engine1_losses_on_time += m_game_mgr[i].m_engine1_losses_on_time;
-      engine2_losses_on_time += m_game_mgr[i].m_engine2_losses_on_time;
-
-      total_depth1 += m_game_mgr[i].m_engine_total_depth[FIRST];
-      total_depth2 += m_game_mgr[i].m_engine_total_depth[SECOND];
-      total_sel_depth1 += m_game_mgr[i].m_engine_total_sel_depth[FIRST];
-      total_sel_depth2 += m_game_mgr[i].m_engine_total_sel_depth[SECOND];
-      total_time1 += m_game_mgr[i].m_engine_total_time_ms[FIRST];
-      total_time2 += m_game_mgr[i].m_engine_total_time_ms[SECOND];
-      total_nodes1 += m_game_mgr[i].m_engine_total_nodes[FIRST];
-      total_nodes2 += m_game_mgr[i].m_engine_total_nodes[SECOND];
-      total_moves1 += m_game_mgr[i].m_engine_num_moves[FIRST];
-      total_moves2 += m_game_mgr[i].m_engine_num_moves[SECOND];
-   }
-
-   int total = engine1_wins + engine2_wins + draws;
-   double engine1_score = (total > 0) ? ((double)engine1_wins + (double)draws / 2.0) / (double)total : 0.5;
-   double engine2_score = 1.0 - engine1_score;
-   double elo_diff = (total > 0) ? log10(1.0 / engine2_score - 1.0) * 400.0 : 0.0;
+   int N_pairs = m_penta[0] + m_penta[1] + m_penta[2] + m_penta[3] + m_penta[4];
+   double elo_diff = (r.total_games > 0) ? log10(1.0 / r.engine_score[SECOND] - 1.0) * 400.0 : 0.0;
 
    string name1 = filename_from_path(options.engine_file_name_1);
    string name2 = filename_from_path(options.engine_file_name_2);
 
-   int lw = 20; // label width
+   int lw = 32; // label width
    int vw = 25; // value column width
 
    cout.imbue(locale(cout.getloc(), new comma_numpunct()));
@@ -500,48 +626,61 @@ void MatchManager::print_final_results(void)
 
    cout << "\n";
    cout << "MATCH INFO\n\n";
-   cout << "E1:              " << name1 << "\n";
-   cout << "E2:              " << name2 << "\n";
-   cout << "Time Control:    " << m_tc_str << "\n";
-   cout << "Completed Games: " << total << " / " << options.num_games_to_play << "\n";
-   cout << "FENs File:       " << fens_str << "\n";
-   cout << "Match Duration:  " << dur_str << "\n";
+   cout << "E1:                      " << name1 << "\n";
+   cout << "E2:                      " << name2 << "\n";
+   cout << "Time Control:            " << m_tc_str << "\n";
+   cout << "Completed Games:         " << r.total_games << " / " << options.num_games_to_play << "\n";
+   cout << "Completed Game Pairs:    " << N_pairs << " / " << options.num_games_to_play / 2 << "\n";
+   cout << "FENs File:               " << fens_str << "\n";
+   cout << "Match Duration:          " << dur_str << "\n";
+   cout << "Concurrency:             " << options.num_threads << "\n";
    cout << "\n";
 
    cout << "MATCH STATISTICS\n";
    cout << "  " << left << setw(lw) << "" << right << setw(vw) << "E1" << setw(vw) << "E2" << "\n";
-   cout << "  " << left << setw(lw) << "" << right << setw(vw) << "----------" << setw(vw) << "----------" << "\n";
-   cout << "  " << left << setw(lw) << "Score %" << right << setw(vw) << fixed << setprecision(1) << 100.0 * engine1_score << "%" << setw(vw - 1) << fixed << setprecision(1) << 100.0 * engine2_score << "%\n";
-   cout << "  " << left << setw(lw) << "W / D / L" << right << setw(vw) << (to_string(engine1_wins) + " / " + to_string(draws) + " / " + to_string(engine2_wins)) << setw(vw) << (to_string(engine2_wins) + " / " + to_string(draws) + " / " + to_string(engine1_wins)) << "\n";
-   cout << "  " << left << setw(lw) << "Elo Difference" << right << setw(vw) << showpos << setprecision(2) << elo_diff << noshowpos << "\n";
-   cout << "  " << left << setw(lw) << "Time Forfeits" << right << setw(vw) << engine1_losses_on_time << setw(vw) << engine2_losses_on_time << "\n";
+   cout << "  " << left << setw(lw) << "" << right << setw(vw) << "----------------------" << setw(vw) << "----------------------" << "\n";
+   cout << "  " << left << setw(lw) << "Score %" << right << setw(vw - 1) << fixed << setprecision(1) << 100.0 * r.engine_score[FIRST] << "%" << setw(vw - 1) << fixed << setprecision(1) << 100.0 * r.engine_score[SECOND] << "%\n";
+   cout << "  " << left << setw(lw) << "W / D / L" << right << setw(vw) << (to_string(r.wins[FIRST]) + " / " + to_string(r.draws) + " / " + to_string(r.wins[SECOND])) << setw(vw) << (to_string(r.wins[SECOND]) + " / " + to_string(r.draws) + " / " + to_string(r.wins[FIRST])) << "\n";
+   cout << "  " << left << setw(lw) << "Time Forfeits" << right << setw(vw) << r.losses_on_time[FIRST] << setw(vw) << r.losses_on_time[SECOND] << "\n";
+   cout << "  " << left << setw(lw) << "Elo (classical)" << right << setw(vw) << showpos << setprecision(2) << elo_diff << noshowpos << "\n";
+   cout << "  " << left << setw(lw) << "Elo (game pairs, 95% CI)" << right << setw(vw) << elo_info.elo_str << "\n";
+   cout << "  " << left << setw(lw) << "Elo (normalized, 95% CI)" << right << setw(vw) << elo_info.nElo_str << "\n";
+   cout << "  " << left << setw(lw) << "Avg Game Length (plies)" << right << setw(vw) << fixed << setprecision(1) << r.avg_plies_per_game << "\n";
+   cout << "  " << left << setw(lw) << "Avg Game Duration (s)" << right << setw(vw) << fixed << setprecision(1) << r.avg_game_duration << "\n";
    cout << "\n";
 
    cout << "ENGINE STATISTICS\n";
    cout << "  " << left << setw(lw) << "" << right << setw(vw) << "E1" << setw(vw) << "E2" << "\n";
-   cout << "  " << left << setw(lw) << "" << right << setw(vw) << "----------" << setw(vw) << "----------" << "\n";
+   cout << "  " << left << setw(lw) << "" << right << setw(vw) << "----------------------" << setw(vw) << "----------------------" << "\n";
    cout << "  " << left << setw(lw) << "Avg Depth" << right
-        << setw(vw) << fixed << setprecision(2) << (total_moves1 > 0 ? (double)total_depth1 / (double)total_moves1 : 0.0)
-        << setw(vw) << fixed << setprecision(2) << (total_moves2 > 0 ? (double)total_depth2 / (double)total_moves2 : 0.0) << "\n";
+        << setw(vw) << fixed << setprecision(2) << r.avg_depth[FIRST]
+        << setw(vw) << fixed << setprecision(2) << r.avg_depth[SECOND] << "\n";
    cout << "  " << left << setw(lw) << "Avg Selective Depth" << right
-        << setw(vw) << fixed << setprecision(2) << (total_moves1 > 0 ? (double)total_sel_depth1 / (double)total_moves1 : 0.0)
-        << setw(vw) << fixed << setprecision(2) << (total_moves2 > 0 ? (double)total_sel_depth2 / (double)total_moves2 : 0.0) << "\n";
+        << setw(vw) << fixed << setprecision(2) << r.avg_sel_depth[FIRST]
+        << setw(vw) << fixed << setprecision(2) << r.avg_sel_depth[SECOND] << "\n";
    cout << "  " << left << setw(lw) << "Avg Time / Move (ms)" << right
-        << setw(vw) << fixed << setprecision(0) << (total_moves1 > 0 ? (double)total_time1 / (double)total_moves1 : 0.0)
-        << setw(vw) << fixed << setprecision(0) << (total_moves2 > 0 ? (double)total_time2 / (double)total_moves2 : 0.0) << "\n";
-   cout << "  " << left << setw(lw) << "NPS" << right
-        << setw(vw) << fixed << setprecision(0) << (total_time1 > 0 ? (double)total_nodes1 * 1000.0 / (double)total_time1 : 0.0)
-        << setw(vw) << fixed << setprecision(0) << (total_time2 > 0 ? (double)total_nodes2 * 1000.0 / (double)total_time2 : 0.0) << "\n";
+        << setw(vw) << fixed << setprecision(0) << r.avg_time_per_move[FIRST]
+        << setw(vw) << fixed << setprecision(0) << r.avg_time_per_move[SECOND] << "\n";
+   cout << "  " << left << setw(lw) << "Nodes Per Second" << right
+        << setw(vw) << fixed << setprecision(0) << r.nps[FIRST]
+        << setw(vw) << fixed << setprecision(0) << r.nps[SECOND] << "\n";
+   cout << "  " << left << setw(lw) << "Hash (MB)" << right
+        << setw(vw) << fixed << setprecision(0) << options.mem_size_1
+        << setw(vw) << fixed << setprecision(0) << options.mem_size_2 << "\n";
+   cout << "  " << left << setw(lw) << "Threads" << right
+        << setw(vw) << fixed << setprecision(0) << options.num_cores_1
+        << setw(vw) << fixed << setprecision(0) << options.num_cores_2 << "\n";
 
-   if (illegal_move_games != 0)
-      cout << "\n  [games ending in illegal move: " << illegal_move_games << "]";
    cout << "\n";
+
+   print_error_messages(true);
 }
 
 void MatchManager::print_thread_results(void)
 {
    int lw = 10;  // thread number width
    int ww = 8;   // wins/draws width
+   int sw = 12;  // score width
    int nw = 18;  // nps width
 
    locale comma_locale(cout.getloc(), new comma_numpunct());
@@ -551,123 +690,106 @@ void MatchManager::print_thread_results(void)
    cout << "THREAD RESULTS\n";
    cout << "\n";
    cout << "  " << left << setw(lw) << "Thread" << right
-        << setw(ww) << "W(E1)" << setw(ww) << "W(E2)" << setw(ww) << "D"
+        << setw(ww) << "W(E1)" << setw(ww) << "W(E2)" << setw(ww) << "D" << setw(sw) << "Score(E1)"
         << setw(nw) << "NPS(E1)" << setw(nw) << "NPS(E2)" << "\n";
 
    for (uint i = 0; i < options.num_threads; i++)
    {
+      int total_games = m_game_mgr[i].m_wins[FIRST] + m_game_mgr[i].m_wins[SECOND] + m_game_mgr[i].m_draws;
+      double engine1_score = (total_games > 0) ? ((double)m_game_mgr[i].m_wins[FIRST] + (double)m_game_mgr[i].m_draws / 2.0) / (double)total_games : 0.5;
       double nps1 = m_game_mgr[i].m_engine_total_time_ms[FIRST] > 0 ? (double)m_game_mgr[i].m_engine_total_nodes[FIRST] * 1000.0 / (double)m_game_mgr[i].m_engine_total_time_ms[FIRST] : 0.0;
       double nps2 = m_game_mgr[i].m_engine_total_time_ms[SECOND] > 0 ? (double)m_game_mgr[i].m_engine_total_nodes[SECOND] * 1000.0 / (double)m_game_mgr[i].m_engine_total_time_ms[SECOND] : 0.0;
       cout << "  " << left << setw(lw) << i
-           << right << setw(ww) << m_game_mgr[i].m_engine1_wins
-           << setw(ww) << m_game_mgr[i].m_engine2_wins
+           << right << setw(ww) << m_game_mgr[i].m_wins[FIRST]
+           << setw(ww) << m_game_mgr[i].m_wins[SECOND]
            << setw(ww) << m_game_mgr[i].m_draws
+           << setw(sw - 1) << fixed << setprecision(1) << 100.0 * engine1_score << "%"
            << setw(nw) << fixed << setprecision(0) << nps1
            << setw(nw) << fixed << setprecision(0) << nps2 << "\n";
    }
 }
 
-void MatchManager::print_extended_results(void)
+EloInfo MatchManager::calculate_elo(void)
 {
-   uint engine1_wins = 0, engine2_wins = 0, draws = 0;
-   uint illegal_move_games = 0, engine1_losses_on_time = 0, engine2_losses_on_time = 0;
+   EloInfo elo_info;
 
-   for (uint i = 0; i < options.num_threads; i++)
-   {
-      engine1_wins += m_game_mgr[i].m_engine1_wins;
-      engine2_wins += m_game_mgr[i].m_engine2_wins;
-      draws += m_game_mgr[i].m_draws;
-      illegal_move_games += m_game_mgr[i].m_illegal_move_games;
-      engine1_losses_on_time += m_game_mgr[i].m_engine1_losses_on_time;
-      engine2_losses_on_time += m_game_mgr[i].m_engine2_losses_on_time;
-   }
-
-   int N_games = engine1_wins + engine2_wins + draws;
    int N_pairs = m_penta[0] + m_penta[1] + m_penta[2] + m_penta[3] + m_penta[4];
 
-   stringstream ss_output;
-
    if (N_pairs == 0) {
-      ss_output << "No game pairs completed yet." << endl;
+      elo_info.elo_diff = 0.0;
+      elo_info.elo_margin = 0.0;
+      elo_info.nElo_diff = 0.0;
+      elo_info.nElo_margin = 0.0;
+      elo_info.elo_str = "";
+      elo_info.nElo_str = "";
+      return elo_info;
+   }
+
+   double p[5] = {0.0};
+   for (int k = 0; k < 5; ++k) p[k] = (double)m_penta[k] / N_pairs;
+
+   double score = 0.0;
+   for (int k = 0; k < 5; ++k) score += p[k] * (k * 0.25);
+
+   double var_pair_avg = 0.0;
+   for (int k = 0; k < 5; ++k) {
+      double diff = (k * 0.25) - score;
+      var_pair_avg += p[k] * diff * diff;
+   }
+
+   if (score <= 1e-9 || score >= 1.0 - 1e-9) {
+      elo_info.elo_diff = score > 0.5 ? 1e9 : -1e9;
+      elo_info.elo_margin = 0.0;
+      elo_info.nElo_diff = score > 0.5 ? 1e9 : -1e9;
+      elo_info.nElo_margin = 0.0;
    } else {
-      double p[5] = {0.0};
-      for (int k = 0; k < 5; ++k) p[k] = (double)m_penta[k] / N_pairs;
+      double std_error_of_mean_score = sqrt(var_pair_avg / N_pairs);
 
-      double score = 0.0;
-      for (int k = 0; k < 5; ++k) score += p[k] * (k * 0.25);
+      // 1. Classical / Logistic Elo (Exact bounds calculation)
+      auto to_elo = [](double s) {
+          if (s < 1e-5) s = 1e-5;
+          if (s > 1.0 - 1e-5) s = 1.0 - 1e-5;
+          return -400.0 * log10(1.0 / s - 1.0);
+      };
+      elo_info.elo_diff = to_elo(score);
+      double mu_min = score - 1.96 * std_error_of_mean_score;
+      double mu_max = score + 1.96 * std_error_of_mean_score;
+      elo_info.elo_margin = (to_elo(mu_max) - to_elo(mu_min)) / 2.0;
 
-      double var_pair_avg = 0.0;
-      for (int k = 0; k < 5; ++k) {
-         double diff = (k * 0.25) - score;
-         var_pair_avg += p[k] * diff * diff;
-      }
-
-      ss_output << fixed << setprecision(2);
-
-      if (score <= 1e-9 || score >= 1.0 - 1e-9) {
-         ss_output << "Elo   | " << (score > 0.5 ? "+inf" : "-inf") << endl;
-         ss_output << "nElo  | " << (score > 0.5 ? "+inf" : "-inf") << endl;
-      } else {
-         double std_error_of_mean_score = sqrt(var_pair_avg / N_pairs);
-
-         // 1. Classical / Logistic Elo (Exact bounds calculation)
-         auto to_elo = [](double s) {
-             if (s < 1e-5) s = 1e-5;
-             if (s > 1.0 - 1e-5) s = 1.0 - 1e-5;
-             return -400.0 * log10(1.0 / s - 1.0);
-         };
-         double elo_diff = to_elo(score);
-         double mu_min = score - 1.96 * std_error_of_mean_score;
-         double mu_max = score + 1.96 * std_error_of_mean_score;
-         double elo_margin = (to_elo(mu_max) - to_elo(mu_min)) / 2.0;
-
-         // 2. Normalized Elo (nElo)
-         double sigma_pg = sqrt(2.0 * var_pair_avg);
-         double nElo = 0.0, margin_nElo = 0.0;
-         if (sigma_pg > 1e-9) {
-            double nt = (score - 0.5) / sigma_pg;
-            nElo = nt * (800.0 / log(10.0));
-            double std_err_nt = std_error_of_mean_score / sigma_pg;
-            margin_nElo = 1.96 * std_err_nt * (800.0 / log(10.0));
-         }
-
-         ss_output << "Elo   | " << elo_diff << " +- " << elo_margin << " (95%)" << endl;
-         ss_output << "nElo  | " << nElo << " +- " << margin_nElo << " (95%)" << endl;
-      }
-
-      if (m_sprt_enabled) {
-         stringstream tc_ss;
-         if (options.tc_fixed_time_move_ms > 0)
-            tc_ss << fixed << setprecision(2) << (float)options.tc_fixed_time_move_ms / 1000.0 << "s";
-         else
-            tc_ss << options.tc_ms / 1000 << "+" << fixed << setprecision(2) << (float)options.tc_inc_ms / 1000.0;
-
-         string thread_str = "Th=" + to_string(options.num_cores_1) + (options.num_cores_1 == options.num_cores_2 ? "" : "/" + to_string(options.num_cores_2));
-         string hash_str = "Hash=" + to_string(options.mem_size_1) + "MB" + (options.mem_size_1 == options.mem_size_2 ? "" : "/" + to_string(options.mem_size_2) + "MB");
-
-         ss_output << "SPRT  | " << tc_ss.str() << " " << thread_str << " " << hash_str << " Conc=" << options.num_threads << endl;
-         ss_output << "LLR   | " << m_sprt_llr << " (" << m_sprt_lower_bound << ", " << m_sprt_upper_bound 
-                   << ") [" << m_sprt_elo0 << ", " << m_sprt_elo1 << " " << options.sprt_elo_model << "]" << endl;
-      }
-
-      ss_output << "Games | N: " << N_games << " W: " << engine1_wins << " L: " << engine2_wins << " D: " << draws << " Completed Pairs: " << N_pairs << endl;
-      ss_output << "Penta | " << m_penta[0] << " " << m_penta[1] << " " << m_penta[2] << " " << m_penta[3] << " " << m_penta[4] << endl;
-
-      stringstream ss;
-      if (illegal_move_games != 0) ss << " [Illegal Moves: " << illegal_move_games << "]";
-      if (engine1_losses_on_time != 0 || engine2_losses_on_time != 0) ss << " [Timeouts: " << engine1_losses_on_time << " / " << engine2_losses_on_time << "]";
-      if (ss.str().length() > 0) ss_output << "Info  |" << ss.str() << endl;
-
-      if (m_sprt_enabled && m_sprt_test_finished) {
-         ss_output << "\nSPRT test finished: ";
-         if (m_sprt_decision == SPRT_H1) ss_output << "H1 accepted (Engine 1 is stronger)." << endl;
-         else if (m_sprt_decision == SPRT_H0) ss_output << "H0 accepted (elo is within bounds)." << endl;
+      // 2. Normalized Elo (nElo)
+      double sigma_pg = sqrt(2.0 * var_pair_avg);
+      elo_info.nElo_diff = 0.0;
+      elo_info.nElo_margin = 0.0;
+      if (sigma_pg > 1e-9) {
+         double nt = (score - 0.5) / sigma_pg;
+         elo_info.nElo_diff = nt * (800.0 / log(10.0));
+         double std_err_nt = std_error_of_mean_score / sigma_pg;
+         elo_info.nElo_margin = 1.96 * std_err_nt * (800.0 / log(10.0));
       }
    }
 
-   string output_str = ss_output.str();
+   stringstream ss_elo, ss_nElo;
 
-   cout << output_str;
+   ss_elo << fixed << setprecision(2);
+   if (elo_info.elo_diff >= 1e9)
+      ss_elo << "+inf";
+   else if (elo_info.elo_diff <= -1e9)
+      ss_elo << "-inf";
+   else
+      ss_elo << showpos << elo_info.elo_diff << " +- " << noshowpos << elo_info.elo_margin;
+
+   ss_nElo << fixed << setprecision(2);
+   if (elo_info.nElo_diff >= 1e9)
+      ss_nElo << "+inf";
+   else if (elo_info.nElo_diff <= -1e9)
+      ss_nElo << "-inf";
+   else
+      ss_nElo << showpos << elo_info.nElo_diff << " +- " << noshowpos << elo_info.nElo_margin;
+
+   elo_info.elo_str = ss_elo.str();
+   elo_info.nElo_str = ss_nElo.str();
+
+   return elo_info;
 }
 
 int MatchManager::get_next_fen(string &fen)
@@ -699,6 +821,11 @@ void MatchManager::save_pgn(void)
          m_pgn_file << m_game_mgr[i].m_pgn;
       }
    }
+}
+
+bool MatchManager::simple_output_mode(void)
+{
+   return (options.simple_output || options.print_moves || options.debug_1 || options.debug_2);
 }
 
 void MatchManager::update_penta_stats(void)
@@ -898,6 +1025,7 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("pmoves",     "print out all moves")
          ("pgn",        po::value<string>(&options.pgn_filename), "save games in PGN format to specified file name\n(if file exists it will be overwritten)")
          ("pgn4",       po::value<string>(&options.pgn4_filename), "save games in PGN4 format to specified file name\n(if file exists it will be overwritten)")
+         ("simple",     "simple line-by-line output")
          ("sprt",       "Enable SPRT test. Test stops when bounds are reached.")
          ("sprt-elo-model", po::value<string>(&options.sprt_elo_model)->default_value("normalized"), "SPRT Elo model ('normalized' or 'logistic')")
          ("sprt-elo0",  po::value<double>(&options.sprt_elo0)->default_value(0.0, "0.0"), "SPRT H0 (null hypothesis) Elo.")
@@ -926,6 +1054,7 @@ int parse_cmd_line_options(int argc, char* argv[])
       options.legacy_clocks = (var_map.count("legacy-clocks") != 0);
       options.early_win = (var_map.count("earlywin") != 0);
       options.early_draw = (var_map.count("earlydraw") != 0);
+      options.simple_output = (var_map.count("simple") != 0);
 
       options.sprt_enabled = (var_map.count("sprt") != 0);
       if (options.sprt_elo_model != "normalized" && options.sprt_elo_model != "logistic")
