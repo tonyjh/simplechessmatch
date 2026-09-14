@@ -182,6 +182,11 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
       if (adjudicate_result != UNFINISHED)
       {
          result = adjudicate_result;
+         // When adjudicating a game, the engine currently searching (if UCI)
+         // must be told to stop, before a new game can be started.
+         Engine *searching_engine = (m_turn == WHITE) ? white_engine : black_engine;
+         if (searching_engine->m_uci)
+            searching_engine->send_engine_cmd("stop");
          break;
       }
 
