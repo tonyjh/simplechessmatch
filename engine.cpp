@@ -486,9 +486,12 @@ void Engine::check_engine_output(void)
    }
 }
 
-void Engine::send_move_and_clocks_to_engine(const string &move, const string &startfen, const string &movelist, chrono::milliseconds player_clocks_ms[4],
+void Engine::send_move_and_clocks_to_engine(const string &move, const string &startfen, const string &movelist, const chrono::milliseconds real_player_clocks_ms[4],
                                             int64_t inc_ms, int64_t fixed_time_ms, player_color_4pc turn_4pc)
 {
+   int player_clocks_ms[PLAYER4 + 1];
+   scale_opponent_clocks(real_player_clocks_ms, player_clocks_ms);
+
    m_opponent_move = move;
    if (m_uci)
    {
@@ -500,12 +503,12 @@ void Engine::send_move_and_clocks_to_engine(const string &move, const string &st
       if (fixed_time_ms == 0)
       {
          if (options.fourplayerchess && !options.legacy_clocks)
-            send_engine_cmd("go rtime " + to_string(player_clocks_ms[RED].count()) + " btime " + to_string(player_clocks_ms[BLUE].count()) +
-                            " ytime " + to_string(player_clocks_ms[YELLOW].count()) + " gtime " + to_string(player_clocks_ms[GREEN].count()) +
+            send_engine_cmd("go rtime " + to_string(player_clocks_ms[RED]) + " btime " + to_string(player_clocks_ms[BLUE]) +
+                            " ytime " + to_string(player_clocks_ms[YELLOW]) + " gtime " + to_string(player_clocks_ms[GREEN]) +
                             " rinc " + to_string(inc_ms) + " binc " + to_string(inc_ms) +
                             " yinc " + to_string(inc_ms) + " ginc " + to_string(inc_ms));
          else
-            send_engine_cmd("go wtime " + to_string(player_clocks_ms[WHITE].count()) + " btime " + to_string(player_clocks_ms[BLACK].count()) +
+            send_engine_cmd("go wtime " + to_string(player_clocks_ms[WHITE]) + " btime " + to_string(player_clocks_ms[BLACK]) +
                             " winc " + to_string(inc_ms) + " binc " + to_string(inc_ms));
       }
       else
@@ -517,13 +520,13 @@ void Engine::send_move_and_clocks_to_engine(const string &move, const string &st
       {
          if (options.fourplayerchess && !options.legacy_clocks)
          {
-            send_engine_cmd("time " + to_string(player_clocks_ms[(turn_4pc + 1) % 4].count() / 10));
-            send_engine_cmd("otim " + to_string(player_clocks_ms[turn_4pc].count() / 10));
+            send_engine_cmd("time " + to_string(player_clocks_ms[(turn_4pc + 1) % 4] / 10));
+            send_engine_cmd("otim " + to_string(player_clocks_ms[turn_4pc] / 10));
          }
          else
          {
-            send_engine_cmd("time " + to_string(player_clocks_ms[m_color].count() / 10));
-            send_engine_cmd("otim " + to_string(player_clocks_ms[1 - m_color].count() / 10));
+            send_engine_cmd("time " + to_string(player_clocks_ms[m_color] / 10));
+            send_engine_cmd("otim " + to_string(player_clocks_ms[1 - m_color] / 10));
          }
       }
       else
@@ -540,6 +543,30 @@ void Engine::send_move_and_clocks_to_engine(const string &move, const string &st
          send_engine_cmd("go");
          m_xb_force_mode = false;
       }
+   }
+}
+
+// Time odds clock asymmetry is hidden from the engine. Artificially scale the opponent clock values
+// reported to the engine, so that the engine doesn't know it has a time advantage or disadvantage.
+// This is done so that time odds provides a better simulation of the engine running on a faster/slower CPU.
+// (Some engines may modify their time management strategy based on being ahead or behind on the clock.)
+void Engine::scale_opponent_clocks(const chrono::milliseconds real_player_clocks_ms[4], int player_clocks_ms[4])
+{
+   double opp_time_scale = (m_number == FIRST) ? (options.timeodds_1 / options.timeodds_2) : (options.timeodds_2 / options.timeodds_1);
+
+   if (m_color == WHITE)
+   {
+      player_clocks_ms[0] = (int)(real_player_clocks_ms[0].count());
+      player_clocks_ms[1] = (int)(real_player_clocks_ms[1].count() * opp_time_scale);
+      player_clocks_ms[2] = (int)(real_player_clocks_ms[2].count());
+      player_clocks_ms[3] = (int)(real_player_clocks_ms[3].count() * opp_time_scale);
+   }
+   else
+   {
+      player_clocks_ms[0] = (int)(real_player_clocks_ms[0].count() * opp_time_scale);
+      player_clocks_ms[1] = (int)(real_player_clocks_ms[1].count());
+      player_clocks_ms[2] = (int)(real_player_clocks_ms[2].count() * opp_time_scale);
+      player_clocks_ms[3] = (int)(real_player_clocks_ms[3].count());
    }
 }
 
@@ -830,4 +857,35 @@ void convert_to_lowercase(const string &input_str, string &output_str)
    output_str = input_str;
    for (auto &c : output_str)
       c = tolower(c);
+}
+
+string filename_from_path(const string &path)
+{
+   size_t pos = path.find_last_of("/\\");
+   string filename = (pos == string::npos) ? path : path.substr(pos + 1);
+
+   if (filename.size() >= 5 &&
+       ((filename.compare(filename.size() - 4, 4, ".exe") == 0) ||
+        (filename.compare(filename.size() - 4, 4, ".EXE") == 0)))
+   {
+      filename.resize(filename.size() - 4);
+   }
+
+   return filename;
+}
+
+string format_float(float x)
+{
+   ostringstream oss;
+   oss << fixed << setprecision(6) << x;
+   string s = oss.str();
+
+   // Remove trailing zeros
+   s.erase(s.find_last_not_of('0') + 1);
+
+   // Ensure at least one decimal place
+   if (s.back() == '.')
+      s += '0';
+
+   return s;
 }

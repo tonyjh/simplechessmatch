@@ -67,4 +67,5 @@ private:
    void move_played(const string &move);
    bool check_for_repetition_draw(void);
    game_result check_for_adjudication(Engine *white_engine, Engine *black_engine);
+   chrono::milliseconds scale_ms_value(chrono::milliseconds ms, double scale) { return chrono::milliseconds(static_cast<int64_t>(ms.count() * scale)); }
 };

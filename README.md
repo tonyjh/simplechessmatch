@@ -51,6 +51,10 @@ To compile, Boost library must be installed.
                                      per move.
   --margin arg (=50)                 An engine loses on time if its clock goes
                                      below zero for this amount of time (ms).
+  --timeodds1 arg (=1.0)             first engine time odds: e.g. set to 2.0 to
+                                     give 1st engine 2x time (affects base /
+                                     increment / fixed time control values)
+  --timeodds2 arg (=1.0)             second engine time odds
   --games arg (=1000000)             total number of games to play
   --threads arg (=1)                 number of concurrent games to run
   --maxmoves arg (=1000)             maximum number of moves per game (total)

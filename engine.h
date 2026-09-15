@@ -13,6 +13,7 @@
 #include <vector>
 #include <cctype>
 #include <sstream>
+#include <iomanip>
 
 #define ABS(a)                (((a) > 0) ? (a) : (0 - (a)))
 
@@ -67,6 +68,8 @@ vector<string> get_tokens(const string &s);
 player_color get_color_to_move_from_fen(const string &fen);
 player_color_4pc get_color_4pc_to_move_from_fen(const string &fen);
 void convert_to_lowercase(const string &input_str, string &output_str);
+string filename_from_path(const string &path);
+string format_float(float x);
 
 class Engine
 {
@@ -116,7 +119,7 @@ public:
    int wait_for_ready(bool check_output);
    int engine_new_game_setup(player_color color, player_color turn, int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, const string &fen, const string &variant);
    void engine_new_game_start(int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms);
-   void send_move_and_clocks_to_engine(const string &move, const string &startfen, const string &movelist, chrono::milliseconds player_clocks_ms[4],
+   void send_move_and_clocks_to_engine(const string &move, const string &startfen, const string &movelist, const chrono::milliseconds real_player_clocks_ms[4],
                                        int64_t inc_ms, int64_t fixed_time_ms, player_color_4pc turn_4pc);
    void send_result_to_engine(game_result result);
    bool is_running(void);
@@ -140,6 +143,7 @@ private:
    int readline(void);
    int get_features(void);
    void check_engine_output(void);
+   void scale_opponent_clocks(const chrono::milliseconds real_player_clocks_ms[4], int player_clocks_ms[4]);
 };
 
 struct options_info
@@ -171,6 +175,8 @@ struct options_info
    uint tc_inc_ms;
    uint tc_fixed_time_move_ms;
    uint margin_ms;
+   double timeodds_1;
+   double timeodds_2;
    uint num_games_to_play;
    uint num_threads;
    uint max_moves;

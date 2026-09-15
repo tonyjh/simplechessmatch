@@ -67,8 +67,15 @@ void GameManager::game_runner(void)
    result = run_engine_game(chrono::milliseconds(options.tc_ms), chrono::milliseconds(options.tc_inc_ms),
                             chrono::milliseconds(options.tc_fixed_time_move_ms));
 
+   string name1 = filename_from_path(m_engine1.m_file_name);
+   string name2 = filename_from_path(m_engine2.m_file_name);
+   if (options.timeodds_1 != 1.0)
+      name1 = name1 + "(timeodds=" + format_float(options.timeodds_1) + ")";
+   if (options.timeodds_2 != 1.0)
+      name2 = name2 + "(timeodds=" + format_float(options.timeodds_2) + ")";
+
    if (m_num_moves > 0)
-      store_pgn(result, m_swap_sides ? m_engine2.m_file_name : m_engine1.m_file_name, m_swap_sides ? m_engine1.m_file_name : m_engine2.m_file_name,
+      store_pgn(result, m_swap_sides ? name2 : name1, m_swap_sides ? name1 : name2,
                 chrono::milliseconds(options.tc_ms), chrono::milliseconds(options.tc_inc_ms), chrono::milliseconds(options.tc_fixed_time_move_ms));
 
    if (result == ERROR_ENGINE_DISCONNECTED)
@@ -106,31 +113,50 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    game_result result = UNFINISHED;
    Engine *white_engine;
    Engine *black_engine;
+   double timeodds_white;
+   double timeodds_black;
+   chrono::milliseconds start_time_white_ms;
+   chrono::milliseconds start_time_black_ms;
+   chrono::milliseconds increment_white_ms;
+   chrono::milliseconds increment_black_ms;
+   chrono::milliseconds fixed_time_white_ms;
+   chrono::milliseconds fixed_time_black_ms;
 
    if (m_swap_sides)
    {
       white_engine = &m_engine2;
       black_engine = &m_engine1;
+      timeodds_white = options.timeodds_2;
+      timeodds_black = options.timeodds_1;
    }
    else
    {
       white_engine = &m_engine1;
       black_engine = &m_engine2;
+      timeodds_white = options.timeodds_1;
+      timeodds_black = options.timeodds_2;
    }
+
+   start_time_white_ms = scale_ms_value(start_time_ms, timeodds_white);
+   start_time_black_ms = scale_ms_value(start_time_ms, timeodds_black);
+   increment_white_ms = scale_ms_value(increment_ms, timeodds_white);
+   increment_black_ms = scale_ms_value(increment_ms, timeodds_black);
+   fixed_time_white_ms = scale_ms_value(fixed_time_ms, timeodds_white);
+   fixed_time_black_ms = scale_ms_value(fixed_time_ms, timeodds_black);
 
    if (fixed_time_ms.count())
    {
-      m_player_clocks_ms[PLAYER1] = fixed_time_ms;
-      m_player_clocks_ms[PLAYER2] = fixed_time_ms;
-      m_player_clocks_ms[PLAYER3] = fixed_time_ms;
-      m_player_clocks_ms[PLAYER4] = fixed_time_ms;
+      m_player_clocks_ms[PLAYER1] = fixed_time_white_ms;
+      m_player_clocks_ms[PLAYER2] = fixed_time_black_ms;
+      m_player_clocks_ms[PLAYER3] = fixed_time_white_ms;
+      m_player_clocks_ms[PLAYER4] = fixed_time_black_ms;
    }
    else
    {
-      m_player_clocks_ms[PLAYER1] = start_time_ms;
-      m_player_clocks_ms[PLAYER2] = start_time_ms;
-      m_player_clocks_ms[PLAYER3] = start_time_ms;
-      m_player_clocks_ms[PLAYER4] = start_time_ms;
+      m_player_clocks_ms[PLAYER1] = start_time_white_ms;
+      m_player_clocks_ms[PLAYER2] = start_time_black_ms;
+      m_player_clocks_ms[PLAYER3] = start_time_white_ms;
+      m_player_clocks_ms[PLAYER4] = start_time_black_ms;
    }
 
    this_thread::sleep_for(100ms);
@@ -152,13 +178,13 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
       }
    }
 
-   if (white_engine->engine_new_game_setup(WHITE, m_turn, start_time_ms.count(), increment_ms.count(), fixed_time_ms.count(), m_fen, options.variant) == 0)
+   if (white_engine->engine_new_game_setup(WHITE, m_turn, start_time_white_ms.count(), increment_white_ms.count(), fixed_time_white_ms.count(), m_fen, options.variant) == 0)
    {
       if (!white_engine->m_quit_cmd_sent)
          m_match_mgr->log_error_message("Error: " + white_engine->m_name + " could not start a new game.\n");
       return ERROR_ENGINE_DISCONNECTED;
    }
-   if (black_engine->engine_new_game_setup(BLACK, m_turn, start_time_ms.count(), increment_ms.count(), fixed_time_ms.count(), m_fen, options.variant) == 0)
+   if (black_engine->engine_new_game_setup(BLACK, m_turn, start_time_black_ms.count(), increment_black_ms.count(), fixed_time_black_ms.count(), m_fen, options.variant) == 0)
    {
       if (!black_engine->m_quit_cmd_sent)
          m_match_mgr->log_error_message("Error: " + black_engine->m_name + " could not start a new game.\n");
@@ -170,9 +196,9 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    auto game_start = chrono::steady_clock::now();
 
    if (m_turn == WHITE)
-      white_engine->engine_new_game_start(start_time_ms.count(), increment_ms.count(), fixed_time_ms.count());
+      white_engine->engine_new_game_start(start_time_white_ms.count(), increment_white_ms.count(), fixed_time_white_ms.count());
    else
-      black_engine->engine_new_game_start(start_time_ms.count(), increment_ms.count(), fixed_time_ms.count());
+      black_engine->engine_new_game_start(start_time_black_ms.count(), increment_black_ms.count(), fixed_time_black_ms.count());
 
    m_timestamp = chrono::steady_clock::now();
 
@@ -224,7 +250,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
             result = BLACK_WIN;
             break;
          }
-         *current_clock_ptr = (fixed_time_ms.count() ? (fixed_time_ms) : (*current_clock_ptr + increment_ms));
+         *current_clock_ptr = (fixed_time_white_ms.count() ? (fixed_time_white_ms) : (*current_clock_ptr + increment_white_ms));
 
          convert_move_to_standard_engine_format(white_engine->m_move);
          move_played(white_engine->m_move);
@@ -239,7 +265,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          }
 
          black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
-                                                      increment_ms.count(), fixed_time_ms.count(), m_turn_4pc);
+                                                      increment_black_ms.count(), fixed_time_black_ms.count(), m_turn_4pc);
 
          m_timestamp = chrono::steady_clock::now();
          if (options.print_moves)
@@ -269,7 +295,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
             result = WHITE_WIN;
             break;
          }
-         *current_clock_ptr = (fixed_time_ms.count() ? (fixed_time_ms) : (*current_clock_ptr + increment_ms));
+         *current_clock_ptr = (fixed_time_black_ms.count() ? (fixed_time_black_ms) : (*current_clock_ptr + increment_black_ms));
 
          convert_move_to_standard_engine_format(black_engine->m_move);
          move_played(black_engine->m_move);
@@ -284,7 +310,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          }
 
          white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
-                                                      increment_ms.count(), fixed_time_ms.count(), m_turn_4pc);
+                                                      increment_white_ms.count(), fixed_time_white_ms.count(), m_turn_4pc);
 
          m_timestamp = chrono::steady_clock::now();
          if (options.print_moves)

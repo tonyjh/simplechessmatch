@@ -2,12 +2,6 @@
 
 namespace po = boost::program_options;
 
-static string filename_from_path(const string &path)
-{
-   size_t pos = path.find_last_of("/\\");
-   return (pos == string::npos) ? path : path.substr(pos + 1);
-}
-
 struct comma_numpunct : std::numpunct<char>
 {
    char do_thousands_sep() const override { return ','; }
@@ -509,6 +503,10 @@ void MatchManager::print_results(void)
    double elo_diff = (r.total_games > 0) ? log10(1.0 / r.engine_score[SECOND] - 1.0) * 400.0 : 0.0;
    string name1 = filename_from_path(options.engine_file_name_1);
    string name2 = filename_from_path(options.engine_file_name_2);
+   if (options.timeodds_1 != 1.0)
+      name1 = name1 + "(timeodds=" + format_float(options.timeodds_1) + ")";
+   if (options.timeodds_2 != 1.0)
+      name2 = name2 + "(timeodds=" + format_float(options.timeodds_2) + ")";
 
    cout << "[games " << total_games_completed << "/" << options.num_games_to_play << "]  "
         << "[" << name1 << " vs " << name2 << "]  "
@@ -602,6 +600,10 @@ void MatchManager::print_final_results(void)
 
    string name1 = filename_from_path(options.engine_file_name_1);
    string name2 = filename_from_path(options.engine_file_name_2);
+   if (options.timeodds_1 != 1.0)
+      name1 = name1 + "(timeodds=" + format_float(options.timeodds_1) + ")";
+   if (options.timeodds_2 != 1.0)
+      name2 = name2 + "(timeodds=" + format_float(options.timeodds_2) + ")";
 
    int lw = 32; // label width
    int vw = 25; // value column width
@@ -670,6 +672,9 @@ void MatchManager::print_final_results(void)
    cout << "  " << left << setw(lw) << "Threads" << right
         << setw(vw) << fixed << setprecision(0) << options.num_cores_1
         << setw(vw) << fixed << setprecision(0) << options.num_cores_2 << "\n";
+   cout << "  " << left << setw(lw) << "Time Odds" << right
+        << setw(vw) << format_float(options.timeodds_1)
+        << setw(vw) << format_float(options.timeodds_2) << "\n";
 
    cout << "\n";
 
@@ -1010,6 +1015,8 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("inc",        po::value<uint>(&options.tc_inc_ms)->default_value(100), "time control increment (ms)")
          ("fixed",      po::value<uint>(&options.tc_fixed_time_move_ms)->default_value(0), "time control fixed time per move (ms). This must be set to 0, unless engines should simply use a fixed amount of time per move.")
          ("margin",     po::value<uint>(&options.margin_ms)->default_value(50), "An engine loses on time if its clock goes below zero for this amount of time (ms).")
+         ("timeodds1",  po::value<double>(&options.timeodds_1)->default_value(1.0, "1.0"), "first engine time odds: e.g. set to 2.0 to give 1st engine 2x time (affects base / increment / fixed time control values)")
+         ("timeodds2",  po::value<double>(&options.timeodds_2)->default_value(1.0, "1.0"), "second engine time odds")
          ("games",      po::value<uint>(&options.num_games_to_play)->default_value(1000000), "total number of games to play")
          ("threads",    po::value<uint>(&options.num_threads)->default_value(1), "number of concurrent games to run")
          ("maxmoves",   po::value<uint>(&options.max_moves)->default_value(1000), "maximum number of moves per game (total) before adjudicating draw regardless of scores")
