@@ -508,7 +508,7 @@ void GameManager::store_pgn(game_result result, const string &white_name, const 
          temp_pgn << "\n1... ";
       }
    }
-   for (int i = 0; i < m_move_vector.size(); i++)
+   for (int i = 0; i < (int)m_move_vector.size(); i++)
    {
       int j = i + black_first;
       if ((j % 10) == 0)
@@ -597,7 +597,7 @@ void GameManager::store_pgn4(game_result result, const string &white_name, const
       temp_pgn << "[StartFen4 \"" << m_fen << "\"]\n";
       first_player = get_color_4pc_to_move_from_fen(m_fen);
    }
-   for (int i = 0; i < m_move_vector.size(); i++)
+   for (int i = 0; i < (int)m_move_vector.size(); i++)
    {
       int j = i + static_cast<int>(first_player);
       convert_move_to_PGN4_format(m_move_vector[i]);

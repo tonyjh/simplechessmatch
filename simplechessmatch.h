@@ -1,8 +1,10 @@
 #include "gamemanager.h"
 #include <boost/program_options.hpp>
 #include <fstream>
+#include <chrono>
 #include <math.h>
 #include <mutex>
+#include <algorithm>
 #ifdef WIN32
 #include <conio.h>
 #include <windows.h>
@@ -51,7 +53,19 @@ struct PairRecord {
    game_result g2 = UNFINISHED;
 };
 
+struct RestoredMatchState {
+   int wins[2] = {};
+   int draws = 0;
+   int completed_pairs = 0;
+   int penta[5] = {};
+   uint first_incomplete_pair_id = 0;
+   vector<int> completed_pair_ids;
+   int64_t active_runtime_s = 0;
+};
+
 int parse_cmd_line_options(int argc, char* argv[]);
+void output_options(ostringstream &oss);
+string format_time_duration(int duration_seconds);
 #ifdef WIN32
 BOOL WINAPI ctrl_c_handler(DWORD fdwCtrlType);
 #else
@@ -71,11 +85,17 @@ private:
    fstream m_FENs_file;
    fstream m_pgn_file;
    string m_tc_str;
-   chrono::time_point<chrono::steady_clock> m_match_start_time;
+   chrono::steady_clock::time_point m_session_start_time;
 
    vector<PairRecord> m_pair_records;
+   vector<uint8_t> m_penta_counted;
+   int m_current_pair_id;
+   int m_completed_pairs;
    int m_penta[5];
-   void update_penta_stats(void);
+   int m_wins[2]; // only counted for completed pairs
+   int m_draws;   // only counted for completed pairs
+
+   RestoredMatchState m_restore;
 
    // Error messages
    std::mutex m_output_mutex;
@@ -108,6 +128,8 @@ public:
    void main_loop(void);
    int initialize(void);
    int load_all_engines(void);
+   int read_restore_data(const string &filename, options_info &saved_opts);
+   int apply_restored_state(void);
    void set_engine_options(Engine *engine);
    void send_engine_custom_commands(Engine *engine);
    void log_error_message(int game_number, const std::string& msg);
@@ -119,6 +141,7 @@ public:
    void print_extended_results(AggregatedResults &r);
    void save_pgn(void);
    void shut_down_all_engines(void);
+   void save_match_progress(void);
 
 private:
    bool match_completed(void);
@@ -130,6 +153,8 @@ private:
 
    EloInfo calculate_elo(void);
    AggregatedResults aggregate_results(void);
+   void update_penta_stats(void);
+   void add_pair_score(uint pid);
 
    // Fishtest Statistical LLR Functions
    double secular(const double a[5], const double p[5]);
