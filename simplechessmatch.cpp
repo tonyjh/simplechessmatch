@@ -393,13 +393,13 @@ void MatchManager::send_engine_custom_commands(Engine *engine)
    }
 }
 
-void MatchManager::log_error_message(const std::string& msg)
+void MatchManager::log_error_message(int game_number, const std::string& msg)
 {
    lock_guard<mutex> lock(m_output_mutex);
    if (simple_output_mode())
-      cout << msg;
+      cout << "Game " << game_number << ": " << msg;
    else
-      m_error_messages.push_back(msg);
+      m_error_messages.push_back("Game " + to_string(game_number) + ": " + msg);
 }
 
 void MatchManager::print_error_messages(bool all)
@@ -508,7 +508,7 @@ void MatchManager::print_results(void)
    if (options.timeodds_2 != 1.0)
       name2 = name2 + "(timeodds=" + format_float(options.timeodds_2) + ")";
 
-   cout << "[games " << total_games_completed << "/" << options.num_games_to_play << "]  "
+   cout << "[Games " << total_games_completed << "/" << options.num_games_to_play << "]  "
         << "[" << name1 << " vs " << name2 << "]  "
         << "[" << m_tc_str << "]  "
         << "W1:" << r.wins[FIRST] << "  W2:" << r.wins[SECOND] << "  D:" << r.draws
@@ -554,7 +554,7 @@ void MatchManager::print_extended_results(AggregatedResults &r)
          string hash_str = "Hash=" + to_string(options.mem_size_1) + "MB" + (options.mem_size_1 == options.mem_size_2 ? "" : "/" + to_string(options.mem_size_2) + "MB");
 
          ss_output << "SPRT  | " << tc_ss.str() << " " << thread_str << " " << hash_str << " Conc=" << options.num_threads << endl;
-         ss_output << "LLR   | " << m_sprt_llr << " (" << m_sprt_lower_bound << ", " << m_sprt_upper_bound 
+         ss_output << "LLR   | " << setprecision(3) << m_sprt_llr << " (" << m_sprt_lower_bound << ", " << m_sprt_upper_bound 
                    << ") [" << m_sprt_elo0 << ", " << m_sprt_elo1 << " " << options.sprt_elo_model << "]" << endl;
          m_lines_printed += 2;
       }
@@ -692,7 +692,7 @@ void MatchManager::print_thread_results(void)
    cout.imbue(comma_locale);
 
    cout << "\n";
-   cout << "THREAD RESULTS\n";
+   cout << "PER THREAD STATISTICS\n";
    cout << "\n";
    cout << "  " << left << setw(lw) << "Thread" << right
         << setw(ww) << "W(E1)" << setw(ww) << "W(E2)" << setw(ww) << "D" << setw(sw) << "Score(E1)"
