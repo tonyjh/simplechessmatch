@@ -34,6 +34,7 @@ public:
    atomic<bool> m_pgn_valid;
    game_result m_final_result;
    uint m_pair_id;
+   uint m_game_number;
    static constexpr const char* color_names[2] = {"white", "black"};
    static constexpr const char* color_names_4pc[4] = {"red", "blue", "yellow", "green"};
 
@@ -67,5 +68,6 @@ private:
    void move_played(const string &move);
    bool check_for_repetition_draw(void);
    game_result check_for_adjudication(Engine *white_engine, Engine *black_engine);
+   void log_error_message(const std::string& msg);
    chrono::milliseconds scale_ms_value(chrono::milliseconds ms, double scale) { return chrono::milliseconds(static_cast<int64_t>(ms.count() * scale)); }
 };

@@ -45,6 +45,7 @@ GameManager::GameManager(void)
 
    m_final_result = UNFINISHED;
    m_pair_id = 0;
+   m_game_number = 0;
 }
 
 GameManager::~GameManager(void)
@@ -63,6 +64,8 @@ void GameManager::game_runner(void)
    m_drawish_count = 0;
    m_move_list = "";
    m_move_vector.clear();
+
+   m_game_number = (2 * m_pair_id) + (m_swap_sides ? 1 : 0) + 1;
 
    result = run_engine_game(chrono::milliseconds(options.tc_ms), chrono::milliseconds(options.tc_inc_ms),
                             chrono::milliseconds(options.tc_fixed_time_move_ms));
@@ -99,7 +102,7 @@ void GameManager::game_runner(void)
 
    if ((result == ERROR_ILLEGAL_MOVE) || (result == ERROR_INVALID_POSITION) || (result == UNDETERMINED))
    {
-      m_match_mgr->log_error_message("FEN + moves when error occurred: " + m_fen + " moves " + m_move_list + "\n");
+      log_error_message("FEN + moves when error occurred: " + m_fen + " moves " + m_move_list + "\n");
    }
 
    m_final_result = result;
@@ -165,7 +168,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    if (m_turn == NO_COLOR)
    {
       m_turn = WHITE;
-      m_match_mgr->log_error_message("Error: could not determine color to move from FEN.\n");
+      log_error_message("Error: could not determine color to move from FEN.\n");
    }
 
    if (options.fourplayerchess)
@@ -174,20 +177,20 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
       if (m_turn_4pc == NO_COLOR_4PC)
       {
          m_turn_4pc = RED;
-         m_match_mgr->log_error_message("Error: could not determine color to move from FEN.\n");
+         log_error_message("Error: could not determine color to move from FEN.\n");
       }
    }
 
    if (white_engine->engine_new_game_setup(WHITE, m_turn, start_time_white_ms.count(), increment_white_ms.count(), fixed_time_white_ms.count(), m_fen, options.variant) == 0)
    {
       if (!white_engine->m_quit_cmd_sent)
-         m_match_mgr->log_error_message("Error: " + white_engine->m_name + " could not start a new game.\n");
+         log_error_message("Error: " + white_engine->m_name + " could not start a new game.\n");
       return ERROR_ENGINE_DISCONNECTED;
    }
    if (black_engine->engine_new_game_setup(BLACK, m_turn, start_time_black_ms.count(), increment_black_ms.count(), fixed_time_black_ms.count(), m_fen, options.variant) == 0)
    {
       if (!black_engine->m_quit_cmd_sent)
-         m_match_mgr->log_error_message("Error: " + black_engine->m_name + " could not start a new game.\n");
+         log_error_message("Error: " + black_engine->m_name + " could not start a new game.\n");
       return ERROR_ENGINE_DISCONNECTED;
    }
 
@@ -234,7 +237,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          if (!white_engine->get_engine_move())
          {
             if (!white_engine->m_quit_cmd_sent)
-               m_match_mgr->log_error_message("Error: " + white_engine->m_name + " disconnected.\n");
+               log_error_message("Error: " + white_engine->m_name + " disconnected.\n");
             return ERROR_ENGINE_DISCONNECTED;
          }
          if (white_engine->m_move.empty())
@@ -245,7 +248,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
 
          if (current_clock_ptr->count() < (0 - (int)options.margin_ms))
          {
-            m_match_mgr->log_error_message(white_engine->m_name + " (" + color_name + ") ran out of time. " + to_string(current_clock_ptr->count()) + " ms\n");
+            log_error_message(white_engine->m_name + " (" + color_name + ") ran out of time. " + to_string(current_clock_ptr->count()) + " ms\n");
             m_loss_on_time = true;
             result = BLACK_WIN;
             break;
@@ -279,7 +282,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          if (!black_engine->get_engine_move())
          {
             if (!black_engine->m_quit_cmd_sent)
-               m_match_mgr->log_error_message("Error: " + black_engine->m_name + " disconnected.\n");
+               log_error_message("Error: " + black_engine->m_name + " disconnected.\n");
             return ERROR_ENGINE_DISCONNECTED;
          }
          if (black_engine->m_move.empty())
@@ -290,7 +293,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
 
          if (current_clock_ptr->count() < (0 - (int)options.margin_ms))
          {
-            m_match_mgr->log_error_message(black_engine->m_name + " (" + color_name + ") ran out of time. " + to_string(current_clock_ptr->count()) + " ms\n");
+            log_error_message(black_engine->m_name + " (" + color_name + ") ran out of time. " + to_string(current_clock_ptr->count()) + " ms\n");
             m_loss_on_time = true;
             result = WHITE_WIN;
             break;
@@ -364,18 +367,18 @@ bool GameManager::is_engine_unresponsive(void)
       if ((elapsed_time_ms > 5s) && (!m_engine1.m_is_ready || !m_engine2.m_is_ready))
       {
          if (!m_engine1.m_is_ready)
-            m_match_mgr->log_error_message("Error: " + m_engine1.m_name + " (" + to_string(m_engine1.m_ID) + ") is not ready after 5 seconds.\n");
+            log_error_message("Error: " + m_engine1.m_name + " (" + to_string(m_engine1.m_ID) + ") is not ready after 5 seconds.\n");
          else
-            m_match_mgr->log_error_message("Error: " + m_engine2.m_name + " (" + to_string(m_engine2.m_ID) + ") is not ready after 5 seconds.\n");
+            log_error_message("Error: " + m_engine2.m_name + " (" + to_string(m_engine2.m_ID) + ") is not ready after 5 seconds.\n");
          return true;
       }
 
       if ((clock_ms - elapsed_time_ms) < -10s)
       {
          if (((m_turn == WHITE) && !m_swap_sides) || ((m_turn == BLACK) && m_swap_sides))
-            m_match_mgr->log_error_message("Error: " + m_engine1.m_name + " (" + to_string(m_engine1.m_ID) + ") is not moving (clock < -10s).\n");
+            log_error_message("Error: " + m_engine1.m_name + " (" + to_string(m_engine1.m_ID) + ") is not moving (clock < -10s).\n");
          else
-            m_match_mgr->log_error_message("Error: " + m_engine2.m_name + " (" + to_string(m_engine2.m_ID) + ") is not moving (clock < -10s).\n");
+            log_error_message("Error: " + m_engine2.m_name + " (" + to_string(m_engine2.m_ID) + ") is not moving (clock < -10s).\n");
          return true;
       }
    }
@@ -394,18 +397,18 @@ game_result GameManager::determine_game_result(Engine *white_engine, Engine *bla
    if ((white_result == ERROR_ILLEGAL_MOVE) || (black_result == ERROR_ILLEGAL_MOVE))
    {
       if (white_result == ERROR_ILLEGAL_MOVE)
-         m_match_mgr->log_error_message("Error: " + white_engine->m_name + " reported an illegal move.\n");
+         log_error_message("Error: " + white_engine->m_name + " reported an illegal move.\n");
       else
-         m_match_mgr->log_error_message("Error: " + black_engine->m_name + " reported an illegal move.\n");
+         log_error_message("Error: " + black_engine->m_name + " reported an illegal move.\n");
       m_error = true;
       result = ERROR_ILLEGAL_MOVE;
    }
    else if ((white_result == ERROR_INVALID_POSITION) || (black_result == ERROR_INVALID_POSITION))
    {
       if (white_result == ERROR_INVALID_POSITION)
-         m_match_mgr->log_error_message("Error: " + white_engine->m_name + " reported an invalid position.\n");
+         log_error_message("Error: " + white_engine->m_name + " reported an invalid position.\n");
       else
-         m_match_mgr->log_error_message("Error: " + black_engine->m_name + " reported an invalid position.\n");
+         log_error_message("Error: " + black_engine->m_name + " reported an invalid position.\n");
       m_error = true;
       result = ERROR_INVALID_POSITION;
    }
@@ -417,7 +420,7 @@ game_result GameManager::determine_game_result(Engine *white_engine, Engine *bla
    }
    else if (white_engine->got_decisive_result() && black_engine->got_decisive_result() && (white_result != black_result))
    {
-      m_match_mgr->log_error_message("Error: engines disagree on game result. " + to_string(white_result) + ", " + to_string(black_result) + "; " + to_string(white_engine->m_offered_draw) + ", " + to_string(black_engine->m_offered_draw) + "\n");
+      log_error_message("Error: engines disagree on game result. " + to_string(white_result) + ", " + to_string(black_result) + "; " + to_string(white_engine->m_offered_draw) + ", " + to_string(black_engine->m_offered_draw) + "\n");
       m_error = true;
       result = UNDETERMINED;
    }
@@ -445,7 +448,7 @@ game_result GameManager::determine_game_result(Engine *white_engine, Engine *bla
    }
    else if (m_num_moves >= options.max_moves)
    {
-      m_match_mgr->log_error_message("Draw due to maximum number of moves reached\n");
+      log_error_message("Draw due to maximum number of moves reached\n");
       result = DRAW;
    }
    else if ((white_result == UNFINISHED) && (black_result == UNFINISHED))
@@ -480,6 +483,7 @@ void GameManager::store_pgn(game_result result, const string &white_name, const 
    int64_t base_time_seconds = fixed_time_ms.count() ? 0 : (start_time_ms.count() / 1000);
    int64_t inc_time_seconds = fixed_time_ms.count() ? (fixed_time_ms.count() / 1000) : (increment_ms.count() / 1000);
    temp_pgn << "[TimeControl \"" << base_time_seconds << "+" << inc_time_seconds << "\"]\n";
+   temp_pgn << "[Round \"" << m_game_number << "\"]\n";
    temp_pgn << "[White \"" << white_name << "\"]\n";
    temp_pgn << "[Black \"" << black_name << "\"]\n";
 
@@ -565,6 +569,7 @@ void GameManager::store_pgn4(game_result result, const string &white_name, const
    int64_t base_time_minutes = fixed_time_ms.count() ? 0 : (start_time_ms.count() / 60000);
    int64_t inc_time_seconds = fixed_time_ms.count() ? (fixed_time_ms.count() / 1000) : (increment_ms.count() / 1000);
    temp_pgn << "[TimeControl \"" << base_time_minutes << "+" << inc_time_seconds << "\"]\n";
+   temp_pgn << "[Round \"" << m_game_number << "\"]\n";
    temp_pgn << "[Red \"" << white_name << "\"]\n";
    temp_pgn << "[Blue \"" << black_name << "\"]\n";
 
@@ -662,6 +667,11 @@ bool GameManager::check_for_repetition_draw(void)
          return true;
    }
    return false;
+}
+
+void GameManager::log_error_message(const std::string& msg)
+{
+   m_match_mgr->log_error_message(m_game_number, msg);
 }
 
 // PGN4 / chess.com format uses dashes, e.g. "h2-h3" instead of "h2h3"

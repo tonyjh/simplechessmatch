@@ -393,13 +393,13 @@ void MatchManager::send_engine_custom_commands(Engine *engine)
    }
 }
 
-void MatchManager::log_error_message(const std::string& msg)
+void MatchManager::log_error_message(int game_number, const std::string& msg)
 {
    lock_guard<mutex> lock(m_output_mutex);
    if (simple_output_mode())
-      cout << msg;
+      cout << "Game " << game_number << ": " << msg;
    else
-      m_error_messages.push_back(msg);
+      m_error_messages.push_back("Game " + to_string(game_number) + ": " + msg);
 }
 
 void MatchManager::print_error_messages(bool all)
@@ -508,7 +508,7 @@ void MatchManager::print_results(void)
    if (options.timeodds_2 != 1.0)
       name2 = name2 + "(timeodds=" + format_float(options.timeodds_2) + ")";
 
-   cout << "[games " << total_games_completed << "/" << options.num_games_to_play << "]  "
+   cout << "[Games " << total_games_completed << "/" << options.num_games_to_play << "]  "
         << "[" << name1 << " vs " << name2 << "]  "
         << "[" << m_tc_str << "]  "
         << "W1:" << r.wins[FIRST] << "  W2:" << r.wins[SECOND] << "  D:" << r.draws
@@ -692,7 +692,7 @@ void MatchManager::print_thread_results(void)
    cout.imbue(comma_locale);
 
    cout << "\n";
-   cout << "THREAD RESULTS\n";
+   cout << "PER THREAD STATISTICS\n";
    cout << "\n";
    cout << "  " << left << setw(lw) << "Thread" << right
         << setw(ww) << "W(E1)" << setw(ww) << "W(E2)" << setw(ww) << "D" << setw(sw) << "Score(E1)"

@@ -110,7 +110,7 @@ public:
    int load_all_engines(void);
    void set_engine_options(Engine *engine);
    void send_engine_custom_commands(Engine *engine);
-   void log_error_message(const std::string& msg);
+   void log_error_message(int game_number, const std::string& msg);
    void reset_cursor(void);
    void print_results(void);
    void print_error_messages(bool all);
