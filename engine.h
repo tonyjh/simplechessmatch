@@ -184,6 +184,7 @@ struct options_info
    string variant;
    string pgn_filename;
    string pgn4_filename;
+   uint autosave;
 
    // SPRT options
    bool sprt_enabled;
