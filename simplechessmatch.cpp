@@ -43,6 +43,7 @@ int main(int argc, char* argv[])
       if (match_mgr.read_restore_data(resume_filename, saved_opts) == 0)
          return 0;
       options = saved_opts;
+      options.autosave_filename = resume_filename;
       cout << "Resuming match from " << resume_filename << "\n";
    }
 
@@ -997,9 +998,9 @@ void MatchManager::save_match_progress(void)
    oss << "}\n";
 
    fstream match_progress_save_file;
-   match_progress_save_file.open("matchprogress.json", ios::out);
+   match_progress_save_file.open(options.autosave_filename, ios::out);
    if (!match_progress_save_file.is_open()) {
-      log_error_message(0, "Error: could not open matchprogress.json to save progress\n");
+      log_error_message(0, "Error: could not open " + options.autosave_filename + " to save progress\n");
       return;
    }
 
@@ -1093,6 +1094,7 @@ int MatchManager::read_restore_data(const string &filename, options_info &saved_
    saved_opts.pgn_filename         = o.get<string>("pgn_filename", "");
    saved_opts.pgn4_filename        = o.get<string>("pgn4_filename", "");
    saved_opts.autosave             = o.get<uint>("autosave", 0);
+   saved_opts.autosave_filename    = o.get<string>("autosave_filename", "matchprogress.json");
    saved_opts.sprt_enabled         = get_bool("sprt_enabled", false);
    saved_opts.sprt_elo_model       = o.get<string>("sprt_elo_model", "normalized");
    saved_opts.sprt_elo0            = o.get<double>("sprt_elo0", 0.0);
@@ -1338,6 +1340,7 @@ void output_options(ostringstream &oss)
    oss << "      \"pgn_filename\": \"" << json_escape(options.pgn_filename) << "\",\n";
    oss << "      \"pgn4_filename\": \"" << json_escape(options.pgn4_filename) << "\",\n";
    oss << "      \"autosave\": " << options.autosave << ",\n";
+   oss << "      \"autosave_filename\": \"" << json_escape(options.autosave_filename) << "\",\n";
    oss << "      \"sprt_enabled\": " << (options.sprt_enabled ? "true" : "false") << ",\n";
    oss << "      \"sprt_elo_model\": \"" << options.sprt_elo_model << "\",\n";
    oss << "      \"sprt_elo0\": " << options.sprt_elo0 << ",\n";
@@ -1359,6 +1362,7 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("x1",         "first engine uses xboard protocol. (UCI is the default protocol.)")
          ("x2",         "second engine uses xboard protocol. (UCI is the default protocol.)")
          ("autosave",   po::value<uint>(&options.autosave)->default_value(0), "number of game pairs interval for match progress auto-saving. 0 disables auto-saving.")
+         ("autosave-file", po::value<string>(&options.autosave_filename)->default_value("matchprogress.json"), "file name for match progress auto-saving (default: matchprogress.json)")
          ("resume",     po::value<string>(&resume_filename)->default_value("")->implicit_value("matchprogress.json"), "resume an interrupted match from the saved .json file (default: matchprogress.json)")
          ("cores1",     po::value<uint>(&options.num_cores_1)->default_value(1), "first engine number of cores")
          ("cores2",     po::value<uint>(&options.num_cores_2)->default_value(1), "second engine number of cores")
