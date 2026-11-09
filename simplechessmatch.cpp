@@ -531,6 +531,10 @@ AggregatedResults MatchManager::aggregate_results(void)
       r.avg_time_per_move[e] = r.total_moves[e] > 0 ? (double)r.total_time_ms[e] / (double)r.total_moves[e] : 0.0;
       r.nps[e] = r.total_time_ms[e] > 0 ? (double)r.total_nodes[e] * 1000.0 / (double)r.total_time_ms[e] : 0.0;
       r.engine_score[e] = (r.total_games > 0) ? ((double)r.wins[e] + (double)r.draws / 2.0) / (double)r.total_games : 0.5;
+
+      for (uint i = 0; i < options.num_threads; i++)
+         r.max_time_per_move_ms[e] = max(r.max_time_per_move_ms[e],
+                                         m_game_mgr[i].m_engine_max_time_ms[e].load(std::memory_order_relaxed));
    }
 
    int total_games_previous_sessions = m_restore.wins[0] + m_restore.wins[1] + m_restore.draws;
@@ -631,10 +635,12 @@ void MatchManager::print_extended_results(AggregatedResults &r)
    ss_output << "   E1 | avg_d=" << fixed << setprecision(2) << r.avg_depth[FIRST]
              << " avg_sd=" << fixed << setprecision(2) << r.avg_sel_depth[FIRST]
              << " t/m=" << fixed << setprecision(0) << r.avg_time_per_move[FIRST]
+             << "ms max_t/m=" << r.max_time_per_move_ms[FIRST]
              << "ms nps=" << fixed << setprecision(0) << r.nps[FIRST] << endl;
    ss_output << "   E2 | avg_d=" << fixed << setprecision(2) << r.avg_depth[SECOND]
              << " avg_sd=" << fixed << setprecision(2) << r.avg_sel_depth[SECOND]
              << " t/m=" << fixed << setprecision(0) << r.avg_time_per_move[SECOND]
+             << "ms max_t/m=" << r.max_time_per_move_ms[SECOND]
              << "ms nps=" << fixed << setprecision(0) << r.nps[SECOND] << endl;
    m_lines_printed += 5;
 
@@ -652,6 +658,16 @@ void MatchManager::print_extended_results(AggregatedResults &r)
    }
 
    cout << ss_output.str();
+}
+
+static string engine_table_label(const string &tag, const string &name, size_t width)
+{
+   string prefix = tag + ": ";
+   size_t max_name_len = (width > prefix.size()) ? width - prefix.size() : 0;
+   string short_name = name;
+   if (short_name.size() > max_name_len)
+      short_name = (max_name_len > 3) ? short_name.substr(0, max_name_len - 3) + "..." : short_name.substr(0, max_name_len);
+   return prefix + short_name;
 }
 
 void MatchManager::print_final_results(void)
@@ -693,7 +709,7 @@ void MatchManager::print_final_results(void)
    cout << "\n";
 
    cout << "COMPLETE MATCH STATISTICS\n";
-   cout << "  " << left << setw(lw) << "" << right << setw(vw) << "E1" << setw(vw) << "E2" << "\n";
+   cout << "  " << left << setw(lw) << "" << right << setw(vw) << engine_table_label("E1", name1, vw - 3) << setw(vw) << engine_table_label("E2", name2, vw - 3) << "\n";
    cout << "  " << left << setw(lw) << "" << right << setw(vw) << "----------------------" << setw(vw) << "----------------------" << "\n";
    cout << "  " << left << setw(lw) << "Score %" << right << setw(vw - 1) << fixed << setprecision(1) << 100.0 * r.engine_score[FIRST] << "%" << setw(vw - 1) << fixed << setprecision(1) << 100.0 * r.engine_score[SECOND] << "%\n";
    cout << "  " << left << setw(lw) << "W / D / L" << right << setw(vw) << (to_string(r.wins[FIRST]) + " / " + to_string(r.draws) + " / " + to_string(r.wins[SECOND])) << setw(vw) << (to_string(r.wins[SECOND]) + " / " + to_string(r.draws) + " / " + to_string(r.wins[FIRST])) << "\n";
@@ -703,7 +719,7 @@ void MatchManager::print_final_results(void)
    cout << "\n";
 
    cout << "CURRENT SESSION STATISTICS\n";
-   cout << "  " << left << setw(lw) << "" << right << setw(vw) << "E1" << setw(vw) << "E2" << "\n";
+   cout << "  " << left << setw(lw) << "" << right << setw(vw) << engine_table_label("E1", name1, vw - 3) << setw(vw) << engine_table_label("E2", name2, vw - 3) << "\n";
    cout << "  " << left << setw(lw) << "" << right << setw(vw) << "----------------------" << setw(vw) << "----------------------" << "\n";
    cout << "  " << left << setw(lw) << "Avg Depth" << right
         << setw(vw) << fixed << setprecision(2) << r.avg_depth[FIRST]
@@ -714,6 +730,10 @@ void MatchManager::print_final_results(void)
    cout << "  " << left << setw(lw) << "Avg Time / Move (ms)" << right
         << setw(vw) << fixed << setprecision(0) << r.avg_time_per_move[FIRST]
         << setw(vw) << fixed << setprecision(0) << r.avg_time_per_move[SECOND] << "\n";
+   cout << "  " << left << setw(lw) << "Max Time / Move (ms)" << right
+        << setw(vw) << r.max_time_per_move_ms[FIRST]
+        << setw(vw) << r.max_time_per_move_ms[SECOND] << "\n";
+
    cout << "  " << left << setw(lw) << "Time Forfeits" << right
         << setw(vw) << r.losses_on_time[FIRST]
         << setw(vw) << r.losses_on_time[SECOND] << "\n";
@@ -734,6 +754,7 @@ void MatchManager::print_thread_results(void)
    int ww = 8;   // wins/draws width
    int sw = 12;  // score width
    int nw = 18;  // nps width
+   int mw = 10;  // max move time width
 
    locale comma_locale(cout.getloc(), new comma_numpunct());
    cout.imbue(comma_locale);
@@ -743,6 +764,7 @@ void MatchManager::print_thread_results(void)
    cout << "\n";
    cout << "  " << left << setw(lw) << "Thread" << right
         << setw(ww) << "W(E1)" << setw(ww) << "W(E2)" << setw(ww) << "D" << setw(sw) << "Score(E1)"
+        << setw(mw) << "MaxT(E1)" << setw(mw) << "MaxT(E2)"
         << setw(nw) << "NPS(E1)" << setw(nw) << "NPS(E2)" << "\n";
 
    for (uint i = 0; i < options.num_threads; i++)
@@ -756,6 +778,8 @@ void MatchManager::print_thread_results(void)
            << setw(ww) << m_game_mgr[i].m_wins[SECOND]
            << setw(ww) << m_game_mgr[i].m_draws
            << setw(sw - 1) << fixed << setprecision(1) << 100.0 * engine1_score << "%"
+           << setw(mw) << m_game_mgr[i].m_engine_max_time_ms[FIRST].load(std::memory_order_relaxed)
+           << setw(mw) << m_game_mgr[i].m_engine_max_time_ms[SECOND].load(std::memory_order_relaxed)
            << setw(nw) << fixed << setprecision(0) << nps1
            << setw(nw) << fixed << setprecision(0) << nps2 << "\n";
    }

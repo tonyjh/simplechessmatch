@@ -1,0 +1,9 @@
+*.o
+*.exe
+*.dll
+*.pgn
+*.pgn4
+*.json
+*.txt
+*.epd
+*.md

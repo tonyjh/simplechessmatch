@@ -23,6 +23,7 @@ public:
    uint64_t m_engine_total_time_ms[2];
    uint64_t m_engine_total_nodes[2];
    uint64_t m_engine_num_moves[2];
+   std::atomic<uint64_t> m_engine_max_time_ms[2];
    uint64_t m_total_plies;
    uint64_t m_total_game_time_ms;
    atomic<bool> m_thread_running;
@@ -69,5 +70,6 @@ private:
    bool check_for_repetition_draw(void);
    game_result check_for_adjudication(Engine *white_engine, Engine *black_engine);
    void log_error_message(const std::string& msg);
+   void record_move_time(int engine, uint64_t time_ms);
    chrono::milliseconds scale_ms_value(chrono::milliseconds ms, double scale) { return chrono::milliseconds(static_cast<int64_t>(ms.count() * scale)); }
 };

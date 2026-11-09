@@ -30,6 +30,7 @@ struct AggregatedResults {
    uint64_t total_moves[2] = {};
    uint64_t total_plies = 0;
    uint64_t total_game_time_ms = 0;
+   uint64_t max_time_per_move_ms[2] = {};
    double engine_score[2] = {};
    double avg_depth[2] = {};
    double avg_sel_depth[2] = {};

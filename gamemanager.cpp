@@ -25,6 +25,8 @@ GameManager::GameManager(void)
    m_engine_total_nodes[SECOND] = 0;
    m_engine_num_moves[FIRST] = 0;
    m_engine_num_moves[SECOND] = 0;
+   m_engine_max_time_ms[FIRST].store(0);
+   m_engine_max_time_ms[SECOND].store(0);
    m_total_plies = 0;
    m_total_game_time_ms = 0;
    m_thread_running = false;
@@ -50,6 +52,14 @@ GameManager::GameManager(void)
 
 GameManager::~GameManager(void)
 {
+}
+
+void GameManager::record_move_time(int engine, uint64_t time_ms)
+{
+   auto &max_time_ms = m_engine_max_time_ms[engine];
+
+   if (time_ms > max_time_ms.load(std::memory_order_relaxed))
+      max_time_ms.store(time_ms, std::memory_order_relaxed);
 }
 
 void GameManager::game_runner(void)
@@ -265,6 +275,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
             m_engine_total_time_ms[white_engine->m_number] += elapsed_time_ms.count();
             m_engine_total_nodes[white_engine->m_number] += white_engine->get_nodes();
             m_engine_num_moves[white_engine->m_number]++;
+            record_move_time(white_engine->m_number, elapsed_time_ms.count());
          }
 
          black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
@@ -310,6 +321,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
             m_engine_total_time_ms[black_engine->m_number] += elapsed_time_ms.count();
             m_engine_total_nodes[black_engine->m_number] += black_engine->get_nodes();
             m_engine_num_moves[black_engine->m_number]++;
+            record_move_time(black_engine->m_number, elapsed_time_ms.count());
          }
 
          white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
