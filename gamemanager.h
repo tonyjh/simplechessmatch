@@ -23,6 +23,10 @@ public:
    uint64_t m_engine_total_time_ms[2];
    uint64_t m_engine_total_nodes[2];
    uint64_t m_engine_num_moves[2];
+   uint64_t m_engine_clock_left_ms[2];        // sum of clock time remaining at game end
+   uint64_t m_engine_clock_left_games[2];     // number of games counted for clock statistics
+   double m_engine_clock_left_pct_sum[2];     // sum of remaining clock as % of available time
+   double m_engine_clock_left_per_move_sum[2]; // sum of remaining clock per move (ms)
    std::atomic<uint64_t> m_engine_max_time_ms[2];
    uint64_t m_total_plies;
    uint64_t m_total_game_time_ms;
@@ -42,6 +46,7 @@ public:
 private:
    string m_move_list;
    vector<string> m_move_vector;
+   vector<string> m_move_clocks;   // remaining clock (formatted for PGN %clk comments), parallel to m_move_vector
    player_color m_turn;
    player_color_4pc m_turn_4pc;
    uint m_num_moves;
@@ -71,5 +76,7 @@ private:
    game_result check_for_adjudication(Engine *white_engine, Engine *black_engine);
    void log_error_message(const std::string& msg);
    void record_move_time(int engine, uint64_t time_ms);
+   void record_clock_left(Engine *engine, chrono::milliseconds clock_ms, chrono::milliseconds start_ms,
+                          chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, uint own_moves);
    chrono::milliseconds scale_ms_value(chrono::milliseconds ms, double scale) { return chrono::milliseconds(static_cast<int64_t>(ms.count() * scale)); }
 };

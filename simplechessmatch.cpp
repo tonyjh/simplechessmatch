@@ -519,6 +519,14 @@ AggregatedResults MatchManager::aggregate_results(void)
       r.total_nodes[SECOND] += m_game_mgr[i].m_engine_total_nodes[SECOND];
       r.total_moves[FIRST] += m_game_mgr[i].m_engine_num_moves[FIRST];
       r.total_moves[SECOND] += m_game_mgr[i].m_engine_num_moves[SECOND];
+      r.clock_left_ms[FIRST] += m_game_mgr[i].m_engine_clock_left_ms[FIRST];
+      r.clock_left_ms[SECOND] += m_game_mgr[i].m_engine_clock_left_ms[SECOND];
+      r.clock_left_games[FIRST] += m_game_mgr[i].m_engine_clock_left_games[FIRST];
+      r.clock_left_games[SECOND] += m_game_mgr[i].m_engine_clock_left_games[SECOND];
+      r.clock_left_pct_sum[FIRST] += m_game_mgr[i].m_engine_clock_left_pct_sum[FIRST];
+      r.clock_left_pct_sum[SECOND] += m_game_mgr[i].m_engine_clock_left_pct_sum[SECOND];
+      r.clock_left_per_move_sum[FIRST] += m_game_mgr[i].m_engine_clock_left_per_move_sum[FIRST];
+      r.clock_left_per_move_sum[SECOND] += m_game_mgr[i].m_engine_clock_left_per_move_sum[SECOND];
       r.total_plies += m_game_mgr[i].m_total_plies;
       r.total_game_time_ms += m_game_mgr[i].m_total_game_time_ms;
    }
@@ -529,8 +537,15 @@ AggregatedResults MatchManager::aggregate_results(void)
       r.avg_depth[e] = r.total_moves[e] > 0 ? (double)r.total_depth[e] / (double)r.total_moves[e] : 0.0;
       r.avg_sel_depth[e] = r.total_moves[e] > 0 ? (double)r.total_sel_depth[e] / (double)r.total_moves[e] : 0.0;
       r.avg_time_per_move[e] = r.total_moves[e] > 0 ? (double)r.total_time_ms[e] / (double)r.total_moves[e] : 0.0;
+      r.avg_nodes_per_move[e] = r.total_moves[e] > 0 ? (double)r.total_nodes[e] / (double)r.total_moves[e] : 0.0;
       r.nps[e] = r.total_time_ms[e] > 0 ? (double)r.total_nodes[e] * 1000.0 / (double)r.total_time_ms[e] : 0.0;
       r.engine_score[e] = (r.total_games > 0) ? ((double)r.wins[e] + (double)r.draws / 2.0) / (double)r.total_games : 0.5;
+
+      // Clock-left averages exclude games where the engine lost on time (negative clock).
+      double clock_games = (double)r.clock_left_games[e];
+      r.avg_clock_left_ms[e] = clock_games > 0 ? (double)r.clock_left_ms[e] / clock_games : 0.0;
+      r.avg_clock_left_pct[e] = clock_games > 0 ? r.clock_left_pct_sum[e] / clock_games : 0.0;
+      r.avg_clock_left_per_move_ms[e] = clock_games > 0 ? r.clock_left_per_move_sum[e] / clock_games : 0.0;
 
       for (uint i = 0; i < options.num_threads; i++)
          r.max_time_per_move_ms[e] = max(r.max_time_per_move_ms[e],
@@ -630,18 +645,33 @@ void MatchManager::print_extended_results(AggregatedResults &r)
    ss_output << "Penta | " << m_penta[0] << " " << m_penta[1] << " " << m_penta[2] << " " << m_penta[3] << " " << m_penta[4] << endl;
 
    ss_output << endl << "Session Stats:" << endl;
+
+   // Rough estimate of the time left in the match, based on the average wall-clock
+   // game duration so far and the number of games still to play (per thread).
+   // Skipped for SPRT and effectively unbounded matches, where the target is not meaningful.
+   int remaining_games = (int)options.num_games_to_play - (int)r.total_games;
+   string eta_str = "n/a";
+   if (!m_sprt_enabled && (options.num_games_to_play < 1000000) && (remaining_games > 0) && (r.avg_game_duration > 0.0))
+   {
+      double eta_s = r.avg_game_duration * (double)remaining_games / (double)max(1u, options.num_threads);
+      eta_str = format_time_duration((int)min(eta_s, 2000000000.0));
+   }
+
    ss_output << "Stats | avg_plies=" << fixed << setprecision(1) << r.avg_plies_per_game
-             << " avg_dur=" << r.avg_game_duration << "s run_time=" << runtime_str << endl;
+             << " avg_dur=" << r.avg_game_duration << "s run_time=" << runtime_str
+             << " eta=" << eta_str << endl;
    ss_output << "   E1 | avg_d=" << fixed << setprecision(2) << r.avg_depth[FIRST]
              << " avg_sd=" << fixed << setprecision(2) << r.avg_sel_depth[FIRST]
              << " t/m=" << fixed << setprecision(0) << r.avg_time_per_move[FIRST]
              << "ms max_t/m=" << r.max_time_per_move_ms[FIRST]
-             << "ms nps=" << fixed << setprecision(0) << r.nps[FIRST] << endl;
+             << "ms n/m=" << fixed << setprecision(0) << r.avg_nodes_per_move[FIRST]
+             << " nps=" << fixed << setprecision(0) << r.nps[FIRST] << endl;
    ss_output << "   E2 | avg_d=" << fixed << setprecision(2) << r.avg_depth[SECOND]
              << " avg_sd=" << fixed << setprecision(2) << r.avg_sel_depth[SECOND]
              << " t/m=" << fixed << setprecision(0) << r.avg_time_per_move[SECOND]
              << "ms max_t/m=" << r.max_time_per_move_ms[SECOND]
-             << "ms nps=" << fixed << setprecision(0) << r.nps[SECOND] << endl;
+             << "ms n/m=" << fixed << setprecision(0) << r.avg_nodes_per_move[SECOND]
+             << " nps=" << fixed << setprecision(0) << r.nps[SECOND] << endl;
    m_lines_printed += 5;
 
    if (m_sprt_enabled && m_sprt_test_finished) {
@@ -733,10 +763,22 @@ void MatchManager::print_final_results(void)
    cout << "  " << left << setw(lw) << "Max Time / Move (ms)" << right
         << setw(vw) << r.max_time_per_move_ms[FIRST]
         << setw(vw) << r.max_time_per_move_ms[SECOND] << "\n";
+   cout << "  " << left << setw(lw) << "Avg Nodes / Move" << right
+        << setw(vw) << fixed << setprecision(0) << r.avg_nodes_per_move[FIRST]
+        << setw(vw) << fixed << setprecision(0) << r.avg_nodes_per_move[SECOND] << "\n";
 
    cout << "  " << left << setw(lw) << "Time Forfeits" << right
         << setw(vw) << r.losses_on_time[FIRST]
         << setw(vw) << r.losses_on_time[SECOND] << "\n";
+   cout << "  " << left << setw(lw) << "Avg Clock Left (ms)" << right
+        << setw(vw) << fixed << setprecision(0) << r.avg_clock_left_ms[FIRST]
+        << setw(vw) << fixed << setprecision(0) << r.avg_clock_left_ms[SECOND] << "\n";
+   cout << "  " << left << setw(lw) << "Avg Clock Left (% of available)" << right
+        << setw(vw) << fixed << setprecision(1) << r.avg_clock_left_pct[FIRST]
+        << setw(vw) << fixed << setprecision(1) << r.avg_clock_left_pct[SECOND] << "\n";
+   cout << "  " << left << setw(lw) << "Avg Clock Left / Move (ms)" << right
+        << setw(vw) << fixed << setprecision(0) << r.avg_clock_left_per_move_ms[FIRST]
+        << setw(vw) << fixed << setprecision(0) << r.avg_clock_left_per_move_ms[SECOND] << "\n";
    cout << "  " << left << setw(lw) << "Nodes Per Second" << right
         << setw(vw) << fixed << setprecision(0) << r.nps[FIRST]
         << setw(vw) << fixed << setprecision(0) << r.nps[SECOND] << "\n";
@@ -1109,11 +1151,16 @@ int MatchManager::read_restore_data(const string &filename, options_info &saved_
          saved_opts.custom_commands_2.push_back(kv.second.get_value<string>());
    saved_opts.debug_1              = get_bool("debug_1", false);
    saved_opts.debug_2              = get_bool("debug_2", false);
+   saved_opts.matescore_1          = o.get<int>("matescore_1", 100000);
+   saved_opts.matescore_2          = o.get<int>("matescore_2", 100000);
    saved_opts.simple_output        = get_bool("simple_output", false);
    saved_opts.print_moves          = get_bool("print_moves", false);
    saved_opts.continue_on_error    = get_bool("continue_on_error", false);
+   saved_opts.force_setboard_1     = get_bool("force_setboard_1", false);
+   saved_opts.force_setboard_2     = get_bool("force_setboard_2", false);
    saved_opts.fourplayerchess      = get_bool("fourplayerchess", false);
    saved_opts.pgn4_format          = get_bool("pgn4_format", false);
+   saved_opts.pgn_clocks           = get_bool("pgn_clocks", false);
    saved_opts.early_win            = get_bool("early_win", false);
    saved_opts.early_draw           = get_bool("early_draw", false);
    saved_opts.legacy_clocks        = get_bool("legacy_clocks", false);
@@ -1357,11 +1404,16 @@ void output_options(ostringstream &oss)
    oss << "],\n";
    oss << "      \"debug_1\": " << (options.debug_1 ? "true" : "false") << ",\n";
    oss << "      \"debug_2\": " << (options.debug_2 ? "true" : "false") << ",\n";
+   oss << "      \"matescore_1\": " << options.matescore_1 << ",\n";
+   oss << "      \"matescore_2\": " << options.matescore_2 << ",\n";
    oss << "      \"simple_output\": " << (options.simple_output ? "true" : "false") << ",\n";
    oss << "      \"print_moves\": " << (options.print_moves ? "true" : "false") << ",\n";
    oss << "      \"continue_on_error\": " << (options.continue_on_error ? "true" : "false") << ",\n";
+   oss << "      \"force_setboard_1\": " << (options.force_setboard_1 ? "true" : "false") << ",\n";
+   oss << "      \"force_setboard_2\": " << (options.force_setboard_2 ? "true" : "false") << ",\n";
    oss << "      \"fourplayerchess\": " << (options.fourplayerchess ? "true" : "false") << ",\n";
    oss << "      \"pgn4_format\": " << (options.pgn4_format ? "true" : "false") << ",\n";
+   oss << "      \"pgn_clocks\": " << (options.pgn_clocks ? "true" : "false") << ",\n";
    oss << "      \"early_win\": " << (options.early_win ? "true" : "false") << ",\n";
    oss << "      \"early_draw\": " << (options.early_draw ? "true" : "false") << ",\n";
    oss << "      \"legacy_clocks\": " << (options.legacy_clocks ? "true" : "false") << ",\n";
@@ -1393,6 +1445,36 @@ void output_options(ostringstream &oss)
 
 int parse_cmd_line_options(int argc, char* argv[])
 {
+   // Allow the optional "setboard" word to follow --x1/--x2.
+   // Boost's flag options cannot take a value, so the word is removed here and
+   // the option is parsed as a plain --x1/--x2 flag.
+   bool x1_force_setboard = false;
+   bool x2_force_setboard = false;
+   vector<string> args;
+   args.reserve(argc);
+   for (int i = 0; i < argc; i++)
+   {
+      string arg = argv[i];
+      if (arg == "--x1" || arg == "--x2")
+      {
+         if ((i + 1 < argc) && (string(argv[i + 1]) == "setboard"))
+         {
+            ((arg == "--x1") ? x1_force_setboard : x2_force_setboard) = true;
+            i++;
+         }
+      }
+      else if (arg == "--x1=setboard" || arg == "--x2=setboard")
+      {
+         ((arg == "--x1=setboard") ? x1_force_setboard : x2_force_setboard) = true;
+         arg.resize(4); // keep only "--x1" or "--x2"
+      }
+      args.push_back(arg);
+   }
+   vector<const char*> args_ptrs;
+   args_ptrs.reserve(args.size());
+   for (const string &arg : args)
+      args_ptrs.push_back(arg.c_str());
+
    try
    {
       po::options_description desc("Command line options");
@@ -1400,8 +1482,8 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("help",       "print help message")
          ("e1",         po::value<string>(&options.engine_file_name_1), "first engine's file name")
          ("e2",         po::value<string>(&options.engine_file_name_2), "second engine's file name")
-         ("x1",         "first engine uses xboard protocol. (UCI is the default protocol.)")
-         ("x2",         "second engine uses xboard protocol. (UCI is the default protocol.)")
+         ("x1",         "first engine uses xboard protocol. (UCI is the default protocol.) Add \"setboard\" to always use setboard instead of edit for opening positions.")
+         ("x2",         "second engine uses xboard protocol. (UCI is the default protocol.) Add \"setboard\" to always use setboard instead of edit for opening positions.")
          ("autosave",   po::value<uint>(&options.autosave)->default_value(0), "number of game pairs interval for match progress auto-saving. 0 disables auto-saving.")
          ("autosave-file", po::value<string>(&options.autosave_filename)->default_value("matchprogress.json"), "file name for match progress auto-saving (default: matchprogress.json)")
          ("resume",     po::value<string>(&resume_filename)->default_value("")->implicit_value("matchprogress.json"), "resume an interrupted match from the saved .json file (default: matchprogress.json)")
@@ -1413,6 +1495,8 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("custom2",    po::value<vector<string>>(&options.custom_commands_2), "second engine custom command. Note: --custom1 and --custom2 can be used more than once in the command line.")
          ("debug1",     "enable debug for first engine")
          ("debug2",     "enable debug for second engine")
+         ("matescore1", po::value<int>(&options.matescore_1)->default_value(100000), "first engine mate score threshold: eval scores above this (or below its negative) are treated as mate scores")
+         ("matescore2", po::value<int>(&options.matescore_2)->default_value(100000), "second engine mate score threshold")
          ("tc",         po::value<uint>(&options.tc_ms)->default_value(10000), "time control base time (ms)")
          ("inc",        po::value<uint>(&options.tc_inc_ms)->default_value(100), "time control increment (ms)")
          ("fixed",      po::value<uint>(&options.tc_fixed_time_move_ms)->default_value(0), "time control fixed time per move (ms). This must be set to 0, unless engines should simply use a fixed amount of time per move.")
@@ -1434,6 +1518,7 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("pmoves",     "print out all moves")
          ("pgn",        po::value<string>(&options.pgn_filename), "save games in PGN format to specified file name\n(if file exists it will be overwritten)")
          ("pgn4",       po::value<string>(&options.pgn4_filename), "save games in PGN4 format to specified file name\n(if file exists it will be overwritten)")
+         ("pgnclocks",  "write clock comments ({[%clk H:MM:SS.d]}) into PGN and PGN4 output")
          ("simple",     "simple line-by-line output")
          ("sprt",       "Enable SPRT test. Test stops when bounds are reached.")
          ("sprt-elo-model", po::value<string>(&options.sprt_elo_model)->default_value("normalized"), "SPRT Elo model ('normalized' or 'logistic')")
@@ -1444,7 +1529,7 @@ int parse_cmd_line_options(int argc, char* argv[])
          ;
 
       po::variables_map var_map;
-      auto parsed = po::parse_command_line(argc, argv, desc);
+      auto parsed = po::parse_command_line((int)args_ptrs.size(), args_ptrs.data(), desc);
       po::store(parsed, var_map);
       po::notify(var_map);
 
@@ -1472,8 +1557,11 @@ int parse_cmd_line_options(int argc, char* argv[])
       options.debug_1 = (var_map.count("debug1") != 0);
       options.debug_2 = (var_map.count("debug2") != 0);
       options.continue_on_error = (var_map.count("continue") != 0);
+      options.force_setboard_1 = x1_force_setboard;
+      options.force_setboard_2 = x2_force_setboard;
       options.print_moves = (var_map.count("pmoves") != 0);
       options.fourplayerchess = (var_map.count("4pc") != 0);
+      options.pgn_clocks = (var_map.count("pgnclocks") != 0);
       options.legacy_clocks = (var_map.count("legacy-clocks") != 0);
       options.early_win = (var_map.count("earlywin") != 0);
       options.early_draw = (var_map.count("earlydraw") != 0);

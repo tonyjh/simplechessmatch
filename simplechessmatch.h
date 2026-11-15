@@ -28,6 +28,10 @@ struct AggregatedResults {
    uint64_t total_time_ms[2] = {};
    uint64_t total_nodes[2] = {};
    uint64_t total_moves[2] = {};
+   uint64_t clock_left_ms[2] = {};
+   uint64_t clock_left_games[2] = {};
+   double clock_left_pct_sum[2] = {};
+   double clock_left_per_move_sum[2] = {};
    uint64_t total_plies = 0;
    uint64_t total_game_time_ms = 0;
    uint64_t max_time_per_move_ms[2] = {};
@@ -35,6 +39,10 @@ struct AggregatedResults {
    double avg_depth[2] = {};
    double avg_sel_depth[2] = {};
    double avg_time_per_move[2] = {};
+   double avg_nodes_per_move[2] = {};
+   double avg_clock_left_ms[2] = {};
+   double avg_clock_left_pct[2] = {};
+   double avg_clock_left_per_move_ms[2] = {};
    double nps[2] = {};
    double avg_plies_per_game = 0.0;
    double avg_game_duration = 0.0;

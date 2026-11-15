@@ -28,9 +28,13 @@ To compile, Boost library must be installed.
   --e1 arg                              first engine's file name
   --e2 arg                              second engine's file name
   --x1                                  first engine uses xboard protocol. (UCI
-                                        is the default protocol.)
+                                        is the default protocol.) Add "setboard"
+                                        to always use setboard instead of edit
+                                        for opening positions.
   --x2                                  second engine uses xboard protocol.
-                                        (UCI is the default protocol.)
+                                        (UCI is the default protocol.) Add
+                                        "setboard" to always use setboard
+                                        instead of edit for opening positions.
   --autosave arg (=0)                   number of game pairs interval for match
                                         progress auto-saving. 0 disables
                                         auto-saving.
@@ -53,6 +57,10 @@ To compile, Boost library must be installed.
                                         more than once in the command line.
   --debug1                              enable debug for first engine
   --debug2                              enable debug for second engine
+  --matescore1 arg (=100000)            first engine mate score threshold: eval
+                                        scores above this (or below its
+                                        negative) are treated as mate scores
+  --matescore2 arg (=100000)            second engine mate score threshold
   --tc arg (=10000)                     time control base time (ms)
   --inc arg (=100)                      time control increment (ms)
   --fixed arg (=0)                      time control fixed time per move (ms).
@@ -96,6 +104,9 @@ To compile, Boost library must be installed.
   --pgn4 arg                            save games in PGN4 format to specified
                                         file name
                                         (if file exists it will be overwritten)
+  --pgnclocks                           write clock comments
+                                        ({[%clk H:MM:SS.d]}) into PGN and PGN4
+                                        output
   --simple                              simple line-by-line output
   --sprt                                Enable SPRT test. Test stops when
                                         bounds are reached.

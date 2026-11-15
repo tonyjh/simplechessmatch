@@ -105,8 +105,8 @@ private:
    bool m_xb_force_mode;            // xboard only
    bool m_debug;
 
-   const int mate_score = 100000;
-   const int mate_score_neg = (0 - mate_score);
+   int m_mate_score;                // score threshold used to identify mate scores
+   int m_mate_score_neg;            // negative mate score threshold
 
 public:
    // functions
@@ -137,6 +137,7 @@ public:
    uint get_sel_depth(void);
    uint64_t get_nodes(void);
    bool is_mate_score(void);
+   void set_mate_score(int value);
    void xb_edit_board(const string &fen);
 
 private:
@@ -152,6 +153,8 @@ struct options_info
    string engine_file_name_2;
    bool uci_1;
    bool uci_2;
+   bool force_setboard_1;
+   bool force_setboard_2;
    uint num_cores_1;
    uint num_cores_2;
    uint mem_size_1;
@@ -162,10 +165,14 @@ struct options_info
    bool debug_2;
    bool simple_output;
 
+   int matescore_1;
+   int matescore_2;
+
    bool print_moves;
    bool continue_on_error;
    bool fourplayerchess;
    bool pgn4_format;
+   bool pgn_clocks;
    bool early_win;
    bool early_draw;
    bool legacy_clocks;

@@ -23,6 +23,8 @@ Engine::Engine(void)
    m_xb_feature_usermove = false;
    m_xb_force_mode = false;
    m_debug = false;
+   m_mate_score = 100000;
+   m_mate_score_neg = (0 - m_mate_score);
    m_score = 0;
    m_depth = 0;
    m_sel_depth = 0;
@@ -66,6 +68,7 @@ int Engine::load_engine(const string &eng_file_name, int ID, engine_number engin
    m_uci = uci;
 
    m_debug = (m_number == FIRST) ? options.debug_1 : options.debug_2;
+   set_mate_score((m_number == FIRST) ? options.matescore_1 : options.matescore_2);
 
    if (m_uci)
       send_engine_cmd("uci");
@@ -235,7 +238,7 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
 
       if (!fen.empty())
       {
-         if (m_xb_feature_setboard)
+         if (m_xb_feature_setboard || ((m_number == FIRST) ? options.force_setboard_1 : options.force_setboard_2))
          {
             send_engine_cmd("force");
             m_xb_force_mode = true;
@@ -391,15 +394,15 @@ void Engine::check_engine_output(void)
                if (tokens[i + 1] == "cp")
                {
                   m_score = atoi(tokens[i + 2].c_str());
-                  if (m_score >= mate_score)
-                     m_score = mate_score - 1;
-                  if (m_score <= mate_score_neg)
-                     m_score = mate_score_neg + 1;
+                  if (m_score >= m_mate_score)
+                     m_score = m_mate_score - 1;
+                  if (m_score <= m_mate_score_neg)
+                     m_score = m_mate_score_neg + 1;
                }
                else if (tokens[i + 1] == "mate")
                {
                   int n = atoi(tokens[i + 2].c_str());
-                  m_score = (n <= 0) ? (mate_score_neg + n) : (mate_score + n);
+                  m_score = (n <= 0) ? (m_mate_score_neg + n) : (m_mate_score + n);
                }
             }
          }
@@ -471,10 +474,10 @@ void Engine::check_engine_output(void)
             m_score = score;
             m_depth = depth;
             m_nodes = nodes;
-            if (m_score > (mate_score + 999))
-               m_score = (mate_score + 999);
-            if (m_score < (mate_score_neg - 999))
-               m_score = mate_score_neg - 999;
+            if (m_score > (m_mate_score + 999))
+               m_score = (m_mate_score + 999);
+            if (m_score < (m_mate_score_neg - 999))
+               m_score = m_mate_score_neg - 999;
             if (tab_pos != string::npos)
             {
                uint sel_depth;
@@ -609,25 +612,25 @@ void Engine::force_exit(void)
 bool Engine::has_checkmate(void)
 {
    // only true for immediate checkmate, not for mate-in-2 etc.
-   return (m_score == (mate_score + 1));
+   return (m_score == (m_mate_score + 1));
 }
 
 bool Engine::is_checkmated(void)
 {
    // only true for immediate checkmate, not for mate-in-2 etc.
-   return (m_score == mate_score_neg);
+   return (m_score == m_mate_score_neg);
 }
 
 bool Engine::is_checkmating(void)
 {
    // true if engine is checkmating in any number of moves.
-   return (m_score > mate_score);
+   return (m_score > m_mate_score);
 }
 
 bool Engine::is_getting_checkmated(void)
 {
    // true if engine is getting checkmated in any number of moves.
-   return (m_score <= mate_score_neg);
+   return (m_score <= m_mate_score_neg);
 }
 
 bool Engine::is_drawish(void)
@@ -668,10 +671,10 @@ void Engine::update_game_result(void)
 string Engine::get_eval(void)
 {
    string s;
-   if (m_score > mate_score)
-      s = "mate in " + to_string(m_score - mate_score);
-   else if (m_score <= mate_score_neg)
-      s = "mated in " + to_string(mate_score_neg - m_score);
+   if (m_score > m_mate_score)
+      s = "mate in " + to_string(m_score - m_mate_score);
+   else if (m_score <= m_mate_score_neg)
+      s = "mated in " + to_string(m_mate_score_neg - m_score);
    else
       s = to_string(m_score);
    return s;
@@ -694,7 +697,15 @@ uint64_t Engine::get_nodes(void)
 
 bool Engine::is_mate_score(void)
 {
-   return (m_score > mate_score) || (m_score <= mate_score_neg);
+   return (m_score > m_mate_score) || (m_score <= m_mate_score_neg);
+}
+
+void Engine::set_mate_score(int value)
+{
+   if (value <= 0)
+      value = 100000;
+   m_mate_score = value;
+   m_mate_score_neg = (0 - value);
 }
 
 // This function is only for old xboard engines that support the "edit" command instead of the "setboard" command.
