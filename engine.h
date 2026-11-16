@@ -117,10 +117,10 @@ public:
    void send_quit_cmd(void);
    int get_engine_move(void);
    int wait_for_ready(bool check_output);
-   int engine_new_game_setup(player_color color, player_color turn, int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, const string &fen, const string &variant);
-   void engine_new_game_start(int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms);
+   int engine_new_game_setup(player_color color, player_color turn, int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, int64_t static_clocks_ms, const string &fen, const string &variant);
+   void engine_new_game_start(int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, int64_t static_clocks_ms);
    void send_move_and_clocks_to_engine(const string &move, const string &startfen, const string &movelist, const chrono::milliseconds real_player_clocks_ms[4],
-                                       int64_t inc_ms, int64_t fixed_time_ms, player_color_4pc turn_4pc);
+                                       int64_t inc_ms, int64_t fixed_time_ms, int64_t static_clocks_ms, player_color_4pc turn_4pc);
    void send_result_to_engine(game_result result);
    bool is_running(void);
    void force_exit(void);
@@ -181,6 +181,7 @@ struct options_info
    uint tc_ms;
    uint tc_inc_ms;
    uint tc_fixed_time_move_ms;
+   uint tc_static_clocks_ms;
    uint margin_ms;
    double timeodds_1;
    double timeodds_2;

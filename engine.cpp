@@ -199,7 +199,7 @@ int Engine::wait_for_ready(bool check_output)
    }
 }
 
-int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, const string &fen, const string &variant)
+int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, int64_t static_clocks_ms, const string &fen, const string &variant)
 {
    m_result = UNFINISHED;
    m_resigned = false;
@@ -261,26 +261,28 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
       }
       else
       {
+         int64_t base_ms = static_clocks_ms ? static_clocks_ms : start_time_ms;
+         int64_t level_inc_ms = static_clocks_ms ? 0 : inc_time_ms;
          // send "level" command.
          char cmd[100];
-         if ((start_time_ms % 60000) == 0)
+         if ((base_ms % 60000) == 0)
          {
-            if ((inc_time_ms % 1000) == 0)
-               snprintf(cmd, 100, "level 0 %d %d", (int)start_time_ms / 60000, (int)inc_time_ms / 1000);
+            if ((level_inc_ms % 1000) == 0)
+               snprintf(cmd, 100, "level 0 %d %d", (int)base_ms / 60000, (int)level_inc_ms / 1000);
             else
-               snprintf(cmd, 100, "level 0 %d %0.3f", (int)start_time_ms / 60000, (float)inc_time_ms / 1000.0);
+               snprintf(cmd, 100, "level 0 %d %0.3f", (int)base_ms / 60000, (float)level_inc_ms / 1000.0);
          }
          else
          {
-            if ((inc_time_ms % 1000) == 0)
-               snprintf(cmd, 100, "level 0 %d:%02d %d", (int)start_time_ms / 60000, (int)(start_time_ms % 60000) / 1000, (int)inc_time_ms / 1000);
+            if ((level_inc_ms % 1000) == 0)
+               snprintf(cmd, 100, "level 0 %d:%02d %d", (int)base_ms / 60000, (int)(base_ms % 60000) / 1000, (int)level_inc_ms / 1000);
             else
-               snprintf(cmd, 100, "level 0 %d:%02d %0.3f", (int)start_time_ms / 60000, (int)(start_time_ms % 60000) / 1000, (float)inc_time_ms / 1000.0);
+               snprintf(cmd, 100, "level 0 %d:%02d %0.3f", (int)base_ms / 60000, (int)(base_ms % 60000) / 1000, (float)level_inc_ms / 1000.0);
          }
 
          send_engine_cmd(cmd);
-         send_engine_cmd("time " + to_string(start_time_ms / 10));
-         send_engine_cmd("otim " + to_string(start_time_ms / 10));
+         send_engine_cmd("time " + to_string(base_ms / 10));
+         send_engine_cmd("otim " + to_string(base_ms / 10));
       }
       if (m_xb_feature_colors)
       {
@@ -294,12 +296,21 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
    return 1;
 }
 
-void Engine::engine_new_game_start(int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms)
+void Engine::engine_new_game_start(int64_t start_time_ms, int64_t inc_time_ms, int64_t fixed_time_ms, int64_t static_clocks_ms)
 {
    if (m_uci)
    {
       if (fixed_time_ms != 0)
          send_engine_cmd("go movetime " + to_string(fixed_time_ms));
+      else if (static_clocks_ms != 0)
+      {
+         if (options.fourplayerchess && !options.legacy_clocks)
+            send_engine_cmd("go rtime " + to_string(static_clocks_ms) + " btime " + to_string(static_clocks_ms) +
+                            " ytime " + to_string(static_clocks_ms) + " gtime " + to_string(static_clocks_ms) +
+                            " rinc 0 binc 0 yinc 0 ginc 0");
+         else
+            send_engine_cmd("go wtime " + to_string(static_clocks_ms) + " btime " + to_string(static_clocks_ms) + " winc 0 binc 0");
+      }
       else
       {
          if (options.fourplayerchess && !options.legacy_clocks)
@@ -490,7 +501,7 @@ void Engine::check_engine_output(void)
 }
 
 void Engine::send_move_and_clocks_to_engine(const string &move, const string &startfen, const string &movelist, const chrono::milliseconds real_player_clocks_ms[4],
-                                            int64_t inc_ms, int64_t fixed_time_ms, player_color_4pc turn_4pc)
+                                            int64_t inc_ms, int64_t fixed_time_ms, int64_t static_clocks_ms, player_color_4pc turn_4pc)
 {
    int player_clocks_ms[PLAYER4 + 1];
    scale_opponent_clocks(real_player_clocks_ms, player_clocks_ms);
@@ -503,7 +514,7 @@ void Engine::send_move_and_clocks_to_engine(const string &move, const string &st
       else
          send_engine_cmd("position fen " + startfen + " moves " + movelist);
 
-      if (fixed_time_ms == 0)
+      if (fixed_time_ms == 0 && static_clocks_ms == 0)
       {
          if (options.fourplayerchess && !options.legacy_clocks)
             send_engine_cmd("go rtime " + to_string(player_clocks_ms[RED]) + " btime " + to_string(player_clocks_ms[BLUE]) +
@@ -514,12 +525,22 @@ void Engine::send_move_and_clocks_to_engine(const string &move, const string &st
             send_engine_cmd("go wtime " + to_string(player_clocks_ms[WHITE]) + " btime " + to_string(player_clocks_ms[BLACK]) +
                             " winc " + to_string(inc_ms) + " binc " + to_string(inc_ms));
       }
+      else if (static_clocks_ms != 0)
+      {
+         if (options.fourplayerchess && !options.legacy_clocks)
+            send_engine_cmd("go rtime " + to_string(static_clocks_ms) + " btime " + to_string(static_clocks_ms) +
+                            " ytime " + to_string(static_clocks_ms) + " gtime " + to_string(static_clocks_ms) +
+                            " rinc 0 binc 0 yinc 0 ginc 0");
+         else
+            send_engine_cmd("go wtime " + to_string(static_clocks_ms) + " btime " + to_string(static_clocks_ms) +
+                            " winc 0 binc 0");
+      }
       else
          send_engine_cmd("go movetime " + to_string(fixed_time_ms));
    }
    else
    {
-      if (fixed_time_ms == 0)
+      if (fixed_time_ms == 0 && static_clocks_ms == 0)
       {
          if (options.fourplayerchess && !options.legacy_clocks)
          {
@@ -531,6 +552,11 @@ void Engine::send_move_and_clocks_to_engine(const string &move, const string &st
             send_engine_cmd("time " + to_string(player_clocks_ms[m_color] / 10));
             send_engine_cmd("otim " + to_string(player_clocks_ms[1 - m_color] / 10));
          }
+      }
+      else if (static_clocks_ms != 0)
+      {
+         send_engine_cmd("time " + to_string(static_clocks_ms / 10));
+         send_engine_cmd("otim " + to_string(static_clocks_ms / 10));
       }
       else
       {

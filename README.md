@@ -28,9 +28,9 @@ To compile, Boost library must be installed.
   --e1 arg                              first engine's file name
   --e2 arg                              second engine's file name
   --x1                                  first engine uses xboard protocol. (UCI
-                                        is the default protocol.) Add "setboard"
-                                        to always use setboard instead of edit
-                                        for opening positions.
+                                        is the default protocol.) Add
+                                        "setboard" to always use setboard
+                                        instead of edit for opening positions.
   --x2                                  second engine uses xboard protocol.
                                         (UCI is the default protocol.) Add
                                         "setboard" to always use setboard
@@ -67,13 +67,18 @@ To compile, Boost library must be installed.
                                         This must be set to 0, unless engines
                                         should simply use a fixed amount of
                                         time per move.
+  --staticclocks arg (=0)               For debugging only: static clocks time
+                                        per move (ms). Engines receive the same
+                                        wtime/btime (rtime/btime/ytime/gtime
+                                        for 4PC, time/otim for xboard) on every
+                                        move.
   --margin arg (=50)                    An engine loses on time if its clock
                                         goes below zero for this amount of time
                                         (ms).
   --timeodds1 arg (=1.0)                first engine time odds: e.g. set to 2.0
                                         to give 1st engine 2x time (affects
-                                        base / increment / fixed time control
-                                        values)
+                                        base / increment / fixed / staticclocks
+                                        time control values)
   --timeodds2 arg (=1.0)                second engine time odds
   --games arg (=1000000)                total number of games to play
   --threads arg (=1)                    number of concurrent games to run
@@ -104,9 +109,8 @@ To compile, Boost library must be installed.
   --pgn4 arg                            save games in PGN4 format to specified
                                         file name
                                         (if file exists it will be overwritten)
-  --pgnclocks                           write clock comments
-                                        ({[%clk H:MM:SS.d]}) into PGN and PGN4
-                                        output
+  --pgnclocks                           write clock comments ({[%clk
+                                        H:MM:SS.d]}) into PGN and PGN4 output
   --simple                              simple line-by-line output
   --sprt                                Enable SPRT test. Test stops when
                                         bounds are reached.

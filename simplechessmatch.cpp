@@ -323,6 +323,9 @@ int MatchManager::initialize(void)
    if (options.tc_fixed_time_move_ms > 0)
       m_tc_str = ((options.tc_fixed_time_move_ms % 1000) == 0) ? to_string(options.tc_fixed_time_move_ms / 1000) + "s fixed" :
                                                                to_string(options.tc_fixed_time_move_ms) + "ms fixed";
+   else if (options.tc_static_clocks_ms > 0)
+      m_tc_str = ((options.tc_static_clocks_ms % 1000) == 0) ? to_string(options.tc_static_clocks_ms / 1000) + "s static clocks" :
+                                                            to_string(options.tc_static_clocks_ms) + "ms static clocks";
    else
    {
       string tc_base_str = ((options.tc_ms % 1000) == 0) ? to_string(options.tc_ms / 1000) + "s + " : to_string(options.tc_ms) + "ms + ";
@@ -628,6 +631,8 @@ void MatchManager::print_extended_results(AggregatedResults &r)
          stringstream tc_ss;
          if (options.tc_fixed_time_move_ms > 0)
             tc_ss << fixed << setprecision(2) << (float)options.tc_fixed_time_move_ms / 1000.0 << "s";
+         else if (options.tc_static_clocks_ms > 0)
+            tc_ss << fixed << setprecision(2) << (float)options.tc_static_clocks_ms / 1000.0 << "s static clocks";
          else
             tc_ss << options.tc_ms / 1000 << "+" << fixed << setprecision(2) << (float)options.tc_inc_ms / 1000.0;
 
@@ -1169,6 +1174,7 @@ int MatchManager::read_restore_data(const string &filename, options_info &saved_
    saved_opts.tc_ms                = o.get<uint>("tc_ms", 10000);
    saved_opts.tc_inc_ms            = o.get<uint>("tc_inc_ms", 100);
    saved_opts.tc_fixed_time_move_ms = o.get<uint>("tc_fixed_time_move_ms", 0);
+   saved_opts.tc_static_clocks_ms = o.get<uint>("tc_static_clocks_ms", 0);
    saved_opts.margin_ms            = o.get<uint>("margin_ms", 50);
    saved_opts.timeodds_1           = o.get<double>("timeodds_1", 1.0);
    saved_opts.timeodds_2           = o.get<double>("timeodds_2", 1.0);
@@ -1422,6 +1428,7 @@ void output_options(ostringstream &oss)
    oss << "      \"tc_ms\": " << options.tc_ms << ",\n";
    oss << "      \"tc_inc_ms\": " << options.tc_inc_ms << ",\n";
    oss << "      \"tc_fixed_time_move_ms\": " << options.tc_fixed_time_move_ms << ",\n";
+   oss << "      \"tc_static_clocks_ms\": " << options.tc_static_clocks_ms << ",\n";
    oss << "      \"margin_ms\": " << options.margin_ms << ",\n";
    oss << "      \"timeodds_1\": " << options.timeodds_1 << ",\n";
    oss << "      \"timeodds_2\": " << options.timeodds_2 << ",\n";
@@ -1500,8 +1507,9 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("tc",         po::value<uint>(&options.tc_ms)->default_value(10000), "time control base time (ms)")
          ("inc",        po::value<uint>(&options.tc_inc_ms)->default_value(100), "time control increment (ms)")
          ("fixed",      po::value<uint>(&options.tc_fixed_time_move_ms)->default_value(0), "time control fixed time per move (ms). This must be set to 0, unless engines should simply use a fixed amount of time per move.")
+         ("staticclocks", po::value<uint>(&options.tc_static_clocks_ms)->default_value(0), "For debugging only: static clocks time per move (ms). Engines receive the same wtime/btime (rtime/btime/ytime/gtime for 4PC, time/otim for xboard) on every move.")
          ("margin",     po::value<uint>(&options.margin_ms)->default_value(50), "An engine loses on time if its clock goes below zero for this amount of time (ms).")
-         ("timeodds1",  po::value<double>(&options.timeodds_1)->default_value(1.0, "1.0"), "first engine time odds: e.g. set to 2.0 to give 1st engine 2x time (affects base / increment / fixed time control values)")
+         ("timeodds1",  po::value<double>(&options.timeodds_1)->default_value(1.0, "1.0"), "first engine time odds: e.g. set to 2.0 to give 1st engine 2x time (affects base / increment / fixed / staticclocks time control values)")
          ("timeodds2",  po::value<double>(&options.timeodds_2)->default_value(1.0, "1.0"), "second engine time odds")
          ("games",      po::value<uint>(&options.num_games_to_play)->default_value(1000000), "total number of games to play")
          ("threads",    po::value<uint>(&options.num_threads)->default_value(1), "number of concurrent games to run")
@@ -1589,6 +1597,12 @@ int parse_cmd_line_options(int argc, char* argv[])
       options.num_threads = MAX_THREADS;
    if (options.num_threads > options.num_games_to_play)
       options.num_threads = options.num_games_to_play;
+
+   if (options.tc_fixed_time_move_ms > 0 && options.tc_static_clocks_ms > 0)
+   {
+      cerr << "error: --fixed and --staticclocks cannot be used together\n";
+      return 0;
+   }
 
    return 1;
 }

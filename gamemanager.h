@@ -65,18 +65,18 @@ public:
    MatchManager* m_match_mgr;
 
 private:
-   game_result run_engine_game(chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms);
+   game_result run_engine_game(chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, chrono::milliseconds static_clocks_ms);
    game_result determine_game_result(Engine *white_engine, Engine *black_engine);
    void store_pgn(game_result result, const string &white_name, const string &black_name,
-                  chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms);
+                  chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, chrono::milliseconds static_clocks_ms);
    void store_pgn4(game_result result, const string &white_name, const string &black_name,
-                   chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms);
+                   chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, chrono::milliseconds static_clocks_ms);
    void move_played(const string &move);
    bool check_for_repetition_draw(void);
    game_result check_for_adjudication(Engine *white_engine, Engine *black_engine);
    void log_error_message(const std::string& msg);
    void record_move_time(int engine, uint64_t time_ms);
    void record_clock_left(Engine *engine, chrono::milliseconds clock_ms, chrono::milliseconds start_ms,
-                          chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, uint own_moves);
+                          chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, chrono::milliseconds static_clocks_ms, uint own_moves);
    chrono::milliseconds scale_ms_value(chrono::milliseconds ms, double scale) { return chrono::milliseconds(static_cast<int64_t>(ms.count() * scale)); }
 };

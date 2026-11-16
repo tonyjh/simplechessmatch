@@ -112,14 +112,16 @@ void GameManager::record_move_time(int engine, uint64_t time_ms)
 }
 
 void GameManager::record_clock_left(Engine *engine, chrono::milliseconds clock_ms, chrono::milliseconds start_ms,
-                                    chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, uint own_moves)
+                                    chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, chrono::milliseconds static_clocks_ms, uint own_moves)
 {
    // Engines that lost on time have a negative clock, so their remaining time is not meaningful.
    if ((clock_ms.count() < 0) || (own_moves == 0))
       return;
 
    // Note: the final clock includes the increment for the last move, so include it in the available time.
-   int64_t available_ms = fixed_time_ms.count() ? fixed_time_ms.count() : (start_ms.count() + increment_ms.count() * (int64_t)own_moves);
+   int64_t available_ms = fixed_time_ms.count() ? fixed_time_ms.count() :
+                          static_clocks_ms.count() ? static_clocks_ms.count() :
+                          (start_ms.count() + increment_ms.count() * (int64_t)own_moves);
    if (available_ms <= 0)
       return;
 
@@ -147,7 +149,7 @@ void GameManager::game_runner(void)
    m_game_number = (2 * m_pair_id) + (m_swap_sides ? 1 : 0) + 1;
 
    result = run_engine_game(chrono::milliseconds(options.tc_ms), chrono::milliseconds(options.tc_inc_ms),
-                            chrono::milliseconds(options.tc_fixed_time_move_ms));
+                            chrono::milliseconds(options.tc_fixed_time_move_ms), chrono::milliseconds(options.tc_static_clocks_ms));
 
    string name1 = filename_from_path(m_engine1.m_file_name);
    string name2 = filename_from_path(m_engine2.m_file_name);
@@ -158,7 +160,7 @@ void GameManager::game_runner(void)
 
    if (m_num_moves > 0)
       store_pgn(result, m_swap_sides ? name2 : name1, m_swap_sides ? name1 : name2,
-                chrono::milliseconds(options.tc_ms), chrono::milliseconds(options.tc_inc_ms), chrono::milliseconds(options.tc_fixed_time_move_ms));
+                chrono::milliseconds(options.tc_ms), chrono::milliseconds(options.tc_inc_ms), chrono::milliseconds(options.tc_fixed_time_move_ms), chrono::milliseconds(options.tc_static_clocks_ms));
 
    if (result == ERROR_ENGINE_DISCONNECTED)
       m_engine_disconnected = true;
@@ -189,7 +191,7 @@ void GameManager::game_runner(void)
    m_thread_running = false;
 }
 
-game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms)
+game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, chrono::milliseconds static_clocks_ms)
 {
    chrono::milliseconds elapsed_time_ms;
    game_result result = UNFINISHED;
@@ -203,6 +205,8 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    chrono::milliseconds increment_black_ms;
    chrono::milliseconds fixed_time_white_ms;
    chrono::milliseconds fixed_time_black_ms;
+   chrono::milliseconds static_clocks_white_ms;
+   chrono::milliseconds static_clocks_black_ms;
 
    if (m_swap_sides)
    {
@@ -225,13 +229,15 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    increment_black_ms = scale_ms_value(increment_ms, timeodds_black);
    fixed_time_white_ms = scale_ms_value(fixed_time_ms, timeodds_white);
    fixed_time_black_ms = scale_ms_value(fixed_time_ms, timeodds_black);
+   static_clocks_white_ms = scale_ms_value(static_clocks_ms, timeodds_white);
+   static_clocks_black_ms = scale_ms_value(static_clocks_ms, timeodds_black);
 
-   if (fixed_time_ms.count())
+   if (fixed_time_ms.count() || static_clocks_ms.count())
    {
-      m_player_clocks_ms[PLAYER1] = fixed_time_white_ms;
-      m_player_clocks_ms[PLAYER2] = fixed_time_black_ms;
-      m_player_clocks_ms[PLAYER3] = fixed_time_white_ms;
-      m_player_clocks_ms[PLAYER4] = fixed_time_black_ms;
+      m_player_clocks_ms[PLAYER1] = fixed_time_ms.count() ? fixed_time_white_ms : static_clocks_white_ms;
+      m_player_clocks_ms[PLAYER2] = fixed_time_ms.count() ? fixed_time_black_ms : static_clocks_black_ms;
+      m_player_clocks_ms[PLAYER3] = fixed_time_ms.count() ? fixed_time_white_ms : static_clocks_white_ms;
+      m_player_clocks_ms[PLAYER4] = fixed_time_ms.count() ? fixed_time_black_ms : static_clocks_black_ms;
    }
    else
    {
@@ -263,13 +269,13 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    uint white_moves = 0;
    uint black_moves = 0;
 
-   if (white_engine->engine_new_game_setup(WHITE, m_turn, start_time_white_ms.count(), increment_white_ms.count(), fixed_time_white_ms.count(), m_fen, options.variant) == 0)
+   if (white_engine->engine_new_game_setup(WHITE, m_turn, start_time_white_ms.count(), increment_white_ms.count(), fixed_time_white_ms.count(), static_clocks_white_ms.count(), m_fen, options.variant) == 0)
    {
       if (!white_engine->m_quit_cmd_sent)
          log_error_message("Error: " + white_engine->m_name + " could not start a new game.\n");
       return ERROR_ENGINE_DISCONNECTED;
    }
-   if (black_engine->engine_new_game_setup(BLACK, m_turn, start_time_black_ms.count(), increment_black_ms.count(), fixed_time_black_ms.count(), m_fen, options.variant) == 0)
+   if (black_engine->engine_new_game_setup(BLACK, m_turn, start_time_black_ms.count(), increment_black_ms.count(), fixed_time_black_ms.count(), static_clocks_black_ms.count(), m_fen, options.variant) == 0)
    {
       if (!black_engine->m_quit_cmd_sent)
          log_error_message("Error: " + black_engine->m_name + " could not start a new game.\n");
@@ -281,9 +287,9 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    auto game_start = chrono::steady_clock::now();
 
    if (m_turn == WHITE)
-      white_engine->engine_new_game_start(start_time_white_ms.count(), increment_white_ms.count(), fixed_time_white_ms.count());
+      white_engine->engine_new_game_start(start_time_white_ms.count(), increment_white_ms.count(), fixed_time_white_ms.count(), static_clocks_white_ms.count());
    else
-      black_engine->engine_new_game_start(start_time_black_ms.count(), increment_black_ms.count(), fixed_time_black_ms.count());
+      black_engine->engine_new_game_start(start_time_black_ms.count(), increment_black_ms.count(), fixed_time_black_ms.count(), static_clocks_black_ms.count());
 
    m_timestamp = chrono::steady_clock::now();
 
@@ -335,7 +341,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
             result = BLACK_WIN;
             break;
          }
-         *current_clock_ptr = (fixed_time_white_ms.count() ? (fixed_time_white_ms) : (*current_clock_ptr + increment_white_ms));
+         *current_clock_ptr = (fixed_time_white_ms.count() ? (fixed_time_white_ms) : (static_clocks_white_ms.count() ? (static_clocks_white_ms) : (*current_clock_ptr + increment_white_ms)));
 
          convert_move_to_standard_engine_format(white_engine->m_move);
          move_played(white_engine->m_move);
@@ -353,7 +359,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          }
 
          black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
-                                                      increment_black_ms.count(), fixed_time_black_ms.count(), m_turn_4pc);
+                                                      increment_black_ms.count(), fixed_time_black_ms.count(), static_clocks_black_ms.count(), m_turn_4pc);
 
          m_timestamp = chrono::steady_clock::now();
          if (options.print_moves)
@@ -383,7 +389,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
             result = WHITE_WIN;
             break;
          }
-         *current_clock_ptr = (fixed_time_black_ms.count() ? (fixed_time_black_ms) : (*current_clock_ptr + increment_black_ms));
+         *current_clock_ptr = (fixed_time_black_ms.count() ? (fixed_time_black_ms) : (static_clocks_black_ms.count() ? (static_clocks_black_ms) : (*current_clock_ptr + increment_black_ms)));
 
          convert_move_to_standard_engine_format(black_engine->m_move);
          move_played(black_engine->m_move);
@@ -401,7 +407,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          }
 
          white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
-                                                      increment_white_ms.count(), fixed_time_white_ms.count(), m_turn_4pc);
+                                                      increment_white_ms.count(), fixed_time_white_ms.count(), static_clocks_white_ms.count(), m_turn_4pc);
 
          m_timestamp = chrono::steady_clock::now();
          if (options.print_moves)
@@ -436,8 +442,8 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
       m_total_game_time_ms += chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - game_start).count();
 
       // Record the clock remaining at the end of the game, excluding the engine that ran out of time.
-      record_clock_left(white_engine, m_player_clocks_ms[WHITE], start_time_white_ms, increment_white_ms, fixed_time_white_ms, white_moves);
-      record_clock_left(black_engine, m_player_clocks_ms[BLACK], start_time_black_ms, increment_black_ms, fixed_time_black_ms, black_moves);
+      record_clock_left(white_engine, m_player_clocks_ms[WHITE], start_time_white_ms, increment_white_ms, fixed_time_white_ms, static_clocks_white_ms, white_moves);
+      record_clock_left(black_engine, m_player_clocks_ms[BLACK], start_time_black_ms, increment_black_ms, fixed_time_black_ms, static_clocks_black_ms, black_moves);
    }
 
    return result;
@@ -558,11 +564,11 @@ game_result GameManager::determine_game_result(Engine *white_engine, Engine *bla
 }
 
 void GameManager::store_pgn(game_result result, const string &white_name, const string &black_name,
-                            chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms)
+                            chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, chrono::milliseconds static_clocks_ms)
 {
    if (options.pgn4_format)
    {
-      store_pgn4(result, white_name, black_name, start_time_ms, increment_ms, fixed_time_ms);
+      store_pgn4(result, white_name, black_name, start_time_ms, increment_ms, fixed_time_ms, static_clocks_ms);
       return;
    }
 
@@ -572,8 +578,8 @@ void GameManager::store_pgn(game_result result, const string &white_name, const 
 
    if (!options.variant.empty())
       temp_pgn << "[Variant \"" << options.variant << "\"]\n";
-   int64_t base_time_ms = fixed_time_ms.count() ? 0 : start_time_ms.count();
-   int64_t inc_time_ms = fixed_time_ms.count() ? fixed_time_ms.count() : increment_ms.count();
+   int64_t base_time_ms = fixed_time_ms.count() ? 0 : (static_clocks_ms.count() ? static_clocks_ms.count() : start_time_ms.count());
+   int64_t inc_time_ms = fixed_time_ms.count() ? fixed_time_ms.count() : (static_clocks_ms.count() ? 0 : increment_ms.count());
    temp_pgn << "[TimeControl \"" << format_tc_seconds(base_time_ms) << "+" << format_tc_seconds(inc_time_ms) << "\"]\n";
    temp_pgn << "[Round \"" << m_game_number << "\"]\n";
    temp_pgn << "[White \"" << white_name << "\"]\n";
@@ -634,7 +640,7 @@ void GameManager::store_pgn(game_result result, const string &white_name, const 
 }
 
 void GameManager::store_pgn4(game_result result, const string &white_name, const string &black_name,
-                             chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms)
+                             chrono::milliseconds start_time_ms, chrono::milliseconds increment_ms, chrono::milliseconds fixed_time_ms, chrono::milliseconds static_clocks_ms)
 {
    stringstream temp_pgn;
    player_color_4pc first_player = RED;
@@ -661,8 +667,8 @@ void GameManager::store_pgn4(game_result result, const string &white_name, const
 
    temp_pgn << "[Variant \"Teams\"]\n";
    temp_pgn << "[RuleVariants \"EnPassant\"]\n";
-   int64_t base_time_minutes = fixed_time_ms.count() ? 0 : (start_time_ms.count() / 60000);
-   int64_t inc_time_ms = fixed_time_ms.count() ? fixed_time_ms.count() : increment_ms.count();
+   int64_t base_time_minutes = (fixed_time_ms.count() || static_clocks_ms.count()) ? 0 : (start_time_ms.count() / 60000);
+   int64_t inc_time_ms = fixed_time_ms.count() ? fixed_time_ms.count() : (static_clocks_ms.count() ? static_clocks_ms.count() : increment_ms.count());
    temp_pgn << "[TimeControl \"" << base_time_minutes << "+" << format_tc_seconds(inc_time_ms) << "\"]\n";
    temp_pgn << "[Round \"" << m_game_number << "\"]\n";
    temp_pgn << "[Red \"" << white_name << "\"]\n";
