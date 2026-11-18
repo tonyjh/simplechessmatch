@@ -1,8 +1,18 @@
 #include "gamemanager.h"
 #include "simplechessmatch.h"
 #include <iostream>
+#include <cstdint>
 
 extern struct options_info options;
+
+// Watchdog thresholds (milliseconds)
+static constexpr int64_t ENGINE_READY_GRACE_MS = 5000;   // Engines must report ready within this time limit
+static constexpr int64_t CLOCK_STALL_GRACE_MS = 10000;   // If an engine's clock goes negative this long, assume engine hang.
+
+static int64_t steady_now_ms(void)
+{
+   return chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 /** Format a clock value (ms) for a PGN "%clk" comment.
  *  Produces "H:MM:SS", or "H:MM:SS.d" when there is a fractional second.
@@ -82,6 +92,8 @@ GameManager::GameManager(void)
    m_swap_sides = false;
    m_loss_on_time = false;
    m_repetition_draw = false;
+   m_move_in_progress = false;
+   m_move_stop_sent = false;
    m_error = false;
    m_engine_disconnected = false;
    m_num_moves = 0;
@@ -90,6 +102,11 @@ GameManager::GameManager(void)
    m_player_clocks_ms[PLAYER2] = chrono::milliseconds(0);
    m_player_clocks_ms[PLAYER3] = chrono::milliseconds(0);
    m_player_clocks_ms[PLAYER4] = chrono::milliseconds(0);
+
+   m_ready_deadline_ms = INT64_MAX;
+   m_unresponsive_deadline_ms = INT64_MAX;
+   m_fixed_time_deadline_ms = INT64_MAX;
+   m_searching_engine = FIRST;
 
    m_pgn_valid = false;
    m_move_list.reserve(1000);
@@ -137,6 +154,7 @@ void GameManager::game_runner(void)
    game_result result;
 
    m_timestamp = chrono::steady_clock::now();
+   m_ready_deadline_ms = steady_now_ms() + ENGINE_READY_GRACE_MS;
    m_loss_on_time = false;
    m_repetition_draw = false;
    m_thread_running = true;
@@ -207,6 +225,12 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    chrono::milliseconds fixed_time_black_ms;
    chrono::milliseconds static_clocks_white_ms;
    chrono::milliseconds static_clocks_black_ms;
+
+   // Fixed depth matches are not bound to a clock, so clocks are neither updated nor adjudicated.
+   bool depth_limited = (options.fixed_depth > 0);
+
+   m_move_in_progress = false;
+   m_move_stop_sent = false;
 
    if (m_swap_sides)
    {
@@ -291,7 +315,7 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
    else
       black_engine->engine_new_game_start(start_time_black_ms.count(), increment_black_ms.count(), fixed_time_black_ms.count(), static_clocks_black_ms.count());
 
-   m_timestamp = chrono::steady_clock::now();
+   arm_move_watchdog();
 
    while ((white_engine->get_game_result() == UNFINISHED) && (black_engine->get_game_result() == UNFINISHED) && (m_num_moves < options.max_moves))
    {
@@ -331,21 +355,30 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          if (white_engine->m_move.empty())
             break; // no legal moves
 
-         elapsed_time_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - m_timestamp);
-         *current_clock_ptr = *current_clock_ptr - elapsed_time_ms;
+         m_move_in_progress = false;
 
-         if (current_clock_ptr->count() < (0 - (int)options.margin_ms))
+         elapsed_time_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - m_timestamp);
+
+         if (!depth_limited)
          {
-            log_error_message(white_engine->m_name + " (" + color_name + ") ran out of time. " + to_string(current_clock_ptr->count()) + " ms\n");
-            m_loss_on_time = true;
-            result = BLACK_WIN;
-            break;
+            *current_clock_ptr = *current_clock_ptr - elapsed_time_ms;
+
+            if (current_clock_ptr->count() < (0 - (int)options.margin_ms))
+            {
+               log_error_message(white_engine->m_name + " (" + color_name + ") ran out of time. " + to_string(current_clock_ptr->count()) + " ms\n");
+               m_loss_on_time = true;
+               result = BLACK_WIN;
+               break;
+            }
+            *current_clock_ptr = (fixed_time_white_ms.count() ? (fixed_time_white_ms) : (static_clocks_white_ms.count() ? (static_clocks_white_ms) : (*current_clock_ptr + increment_white_ms)));
          }
-         *current_clock_ptr = (fixed_time_white_ms.count() ? (fixed_time_white_ms) : (static_clocks_white_ms.count() ? (static_clocks_white_ms) : (*current_clock_ptr + increment_white_ms)));
 
          convert_move_to_standard_engine_format(white_engine->m_move);
          move_played(white_engine->m_move);
-         m_move_clocks.push_back(format_move_clock(current_clock_ptr->count()));
+         if (depth_limited)
+            m_move_clocks.push_back(""); // no clock in a depth-limited match
+         else
+            m_move_clocks.push_back(format_move_clock(current_clock_ptr->count()));
          white_moves++;
 
          if (!white_engine->is_mate_score()) // skip following stats updates if mate score, since these stats are less meaningful when mate is found.
@@ -361,7 +394,6 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          black_engine->send_move_and_clocks_to_engine(white_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
                                                       increment_black_ms.count(), fixed_time_black_ms.count(), static_clocks_black_ms.count(), m_turn_4pc);
 
-         m_timestamp = chrono::steady_clock::now();
          if (options.print_moves)
          {
             cout << color_name << " moved: " << white_engine->m_move << ",   elapsed: " << elapsed_time_ms.count() << " ms,   clock: "
@@ -379,21 +411,30 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          if (black_engine->m_move.empty())
             break; // no legal moves
 
-         elapsed_time_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - m_timestamp);
-         *current_clock_ptr = *current_clock_ptr - elapsed_time_ms;
+         m_move_in_progress = false;
 
-         if (current_clock_ptr->count() < (0 - (int)options.margin_ms))
+         elapsed_time_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - m_timestamp);
+
+         if (!depth_limited)
          {
-            log_error_message(black_engine->m_name + " (" + color_name + ") ran out of time. " + to_string(current_clock_ptr->count()) + " ms\n");
-            m_loss_on_time = true;
-            result = WHITE_WIN;
-            break;
+            *current_clock_ptr = *current_clock_ptr - elapsed_time_ms;
+
+            if (current_clock_ptr->count() < (0 - (int)options.margin_ms))
+            {
+               log_error_message(black_engine->m_name + " (" + color_name + ") ran out of time. " + to_string(current_clock_ptr->count()) + " ms\n");
+               m_loss_on_time = true;
+               result = WHITE_WIN;
+               break;
+            }
+            *current_clock_ptr = (fixed_time_black_ms.count() ? (fixed_time_black_ms) : (static_clocks_black_ms.count() ? (static_clocks_black_ms) : (*current_clock_ptr + increment_black_ms)));
          }
-         *current_clock_ptr = (fixed_time_black_ms.count() ? (fixed_time_black_ms) : (static_clocks_black_ms.count() ? (static_clocks_black_ms) : (*current_clock_ptr + increment_black_ms)));
 
          convert_move_to_standard_engine_format(black_engine->m_move);
          move_played(black_engine->m_move);
-         m_move_clocks.push_back(format_move_clock(current_clock_ptr->count()));
+         if (depth_limited)
+            m_move_clocks.push_back(""); // no clock in a depth-limited match
+         else
+            m_move_clocks.push_back(format_move_clock(current_clock_ptr->count()));
          black_moves++;
 
          if (!black_engine->is_mate_score()) // skip following stats updates if mate score, since these stats are less meaningful when mate is found.
@@ -409,7 +450,6 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
          white_engine->send_move_and_clocks_to_engine(black_engine->m_move, m_fen, m_move_list, m_player_clocks_ms,
                                                       increment_white_ms.count(), fixed_time_white_ms.count(), static_clocks_white_ms.count(), m_turn_4pc);
 
-         m_timestamp = chrono::steady_clock::now();
          if (options.print_moves)
          {
             cout << color_name << " moved: " << black_engine->m_move << ",   elapsed: " << elapsed_time_ms.count() << " ms,   clock: "
@@ -420,11 +460,18 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
       if (options.fourplayerchess)
          m_turn_4pc = static_cast<player_color_4pc>((m_turn_4pc + 1) % 4);
       m_turn = (m_turn == WHITE) ? BLACK : WHITE;
+
+      // The next engine's search has been started (or the game is about to end), so publish the
+      // watchdog state the monitor thread needs for the new move.
+      arm_move_watchdog();
    }
+
+   m_move_in_progress = false;
 
    if (result == UNFINISHED)
    {
       // In case there is unread data (which may contain game result) from engine where result isn't known yet:
+      m_ready_deadline_ms = steady_now_ms() + ENGINE_READY_GRACE_MS;
       if (white_engine->get_game_result() == UNFINISHED)
          white_engine->wait_for_ready(true);
       if (black_engine->get_game_result() == UNFINISHED)
@@ -442,8 +489,11 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
       m_total_game_time_ms += chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - game_start).count();
 
       // Record the clock remaining at the end of the game, excluding the engine that ran out of time.
-      record_clock_left(white_engine, m_player_clocks_ms[WHITE], start_time_white_ms, increment_white_ms, fixed_time_white_ms, static_clocks_white_ms, white_moves);
-      record_clock_left(black_engine, m_player_clocks_ms[BLACK], start_time_black_ms, increment_black_ms, fixed_time_black_ms, static_clocks_black_ms, black_moves);
+      if (!depth_limited)
+      {
+         record_clock_left(white_engine, m_player_clocks_ms[WHITE], start_time_white_ms, increment_white_ms, fixed_time_white_ms, static_clocks_white_ms, white_moves);
+         record_clock_left(black_engine, m_player_clocks_ms[BLACK], start_time_black_ms, increment_black_ms, fixed_time_black_ms, static_clocks_black_ms, black_moves);
+      }
    }
 
    return result;
@@ -451,36 +501,86 @@ game_result GameManager::run_engine_game(chrono::milliseconds start_time_ms, chr
 
 bool GameManager::is_engine_unresponsive(void)
 {
-   if (m_thread_running)
+   if (!m_thread_running)
+      return false;
+
+   const int64_t now_ms = steady_now_ms();
+
+   if ((now_ms > m_ready_deadline_ms.load()) && (!m_engine1.m_is_ready || !m_engine2.m_is_ready))
    {
-      chrono::milliseconds elapsed_time_ms;
-      elapsed_time_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - m_timestamp);
-      chrono::milliseconds clock_ms;
-
-      if (options.fourplayerchess && !options.legacy_clocks)
-         clock_ms = m_player_clocks_ms[m_turn_4pc];
+      if (!m_engine1.m_is_ready)
+         log_error_message("Error: " + m_engine1.m_name + " (" + to_string(m_engine1.m_ID) + ") is not ready after 5 seconds.\n");
       else
-         clock_ms = m_player_clocks_ms[m_turn];
-
-      if ((elapsed_time_ms > 5s) && (!m_engine1.m_is_ready || !m_engine2.m_is_ready))
-      {
-         if (!m_engine1.m_is_ready)
-            log_error_message("Error: " + m_engine1.m_name + " (" + to_string(m_engine1.m_ID) + ") is not ready after 5 seconds.\n");
-         else
-            log_error_message("Error: " + m_engine2.m_name + " (" + to_string(m_engine2.m_ID) + ") is not ready after 5 seconds.\n");
-         return true;
-      }
-
-      if ((clock_ms - elapsed_time_ms) < -10s)
-      {
-         if (((m_turn == WHITE) && !m_swap_sides) || ((m_turn == BLACK) && m_swap_sides))
-            log_error_message("Error: " + m_engine1.m_name + " (" + to_string(m_engine1.m_ID) + ") is not moving (clock < -10s).\n");
-         else
-            log_error_message("Error: " + m_engine2.m_name + " (" + to_string(m_engine2.m_ID) + ") is not moving (clock < -10s).\n");
-         return true;
-      }
+         log_error_message("Error: " + m_engine2.m_name + " (" + to_string(m_engine2.m_ID) + ") is not ready after 5 seconds.\n");
+      return true;
    }
+
+   if (m_move_in_progress && (now_ms > m_unresponsive_deadline_ms.load()))
+   {
+      Engine &engine = (m_searching_engine.load() == FIRST) ? m_engine1 : m_engine2;
+      log_error_message("Error: " + engine.m_name + " (" + to_string(engine.m_ID) + ") is not moving (clock < -10s).\n");
+      return true;
+   }
+
    return false;
+}
+
+bool GameManager::enforce_fixed_time_limit(void)
+{
+   // In a fixed depth match that also uses "--fixed", tell the engine to move as soon as it
+   // exceeds the fixed time per move. The deadline is "never" when this doesn't apply.
+   if (!m_thread_running || !m_move_in_progress || m_move_stop_sent)
+      return false;
+
+   if (steady_now_ms() <= m_fixed_time_deadline_ms.load())
+      return false;
+
+   Engine *searching_engine = (m_searching_engine.load() == FIRST) ? &m_engine1 : &m_engine2;
+
+   m_move_stop_sent = true;
+
+   if (searching_engine->m_uci)
+      searching_engine->send_engine_cmd("stop");
+   else
+      searching_engine->send_engine_cmd("?");
+
+   return true;
+}
+
+// Publishes the state the monitor thread needs to watch the move that is about to start. Only
+// atomics are handed over, so the monitor never reads game-thread state (clocks, turn, timestamp)
+// while the game thread mutates it.
+void GameManager::arm_move_watchdog(void)
+{
+   const int64_t now_ms = steady_now_ms();
+   const int64_t never = INT64_MAX;
+
+   m_timestamp = chrono::steady_clock::now();
+   m_ready_deadline_ms = now_ms + ENGINE_READY_GRACE_MS;
+
+   chrono::milliseconds clock_ms;
+   if (options.fourplayerchess && !options.legacy_clocks)
+      clock_ms = m_player_clocks_ms[m_turn_4pc];
+   else
+      clock_ms = m_player_clocks_ms[m_turn];
+
+   m_searching_engine = (m_turn == WHITE) ? (m_swap_sides ? SECOND : FIRST)
+                                          : (m_swap_sides ? FIRST : SECOND);
+
+   // In a fixed depth match that also uses "--fixed", cap the search time per move.
+   m_fixed_time_deadline_ms = ((options.fixed_depth > 0) && (options.tc_fixed_time_move_ms > 0))
+                                 ? now_ms + (int64_t)options.tc_fixed_time_move_ms
+                                 : never;
+
+   if (options.fixed_depth == 0)
+      m_unresponsive_deadline_ms = now_ms + clock_ms.count() + CLOCK_STALL_GRACE_MS;
+   else if (options.tc_fixed_time_move_ms > 0)
+      m_unresponsive_deadline_ms = now_ms + (int64_t)options.tc_fixed_time_move_ms + CLOCK_STALL_GRACE_MS;
+   else
+      m_unresponsive_deadline_ms = never;
+
+   m_move_stop_sent = false;
+   m_move_in_progress = true;
 }
 
 game_result GameManager::determine_game_result(Engine *white_engine, Engine *black_engine)
@@ -580,7 +680,10 @@ void GameManager::store_pgn(game_result result, const string &white_name, const 
       temp_pgn << "[Variant \"" << options.variant << "\"]\n";
    int64_t base_time_ms = fixed_time_ms.count() ? 0 : (static_clocks_ms.count() ? static_clocks_ms.count() : start_time_ms.count());
    int64_t inc_time_ms = fixed_time_ms.count() ? fixed_time_ms.count() : (static_clocks_ms.count() ? 0 : increment_ms.count());
-   temp_pgn << "[TimeControl \"" << format_tc_seconds(base_time_ms) << "+" << format_tc_seconds(inc_time_ms) << "\"]\n";
+   if (options.fixed_depth > 0)
+      temp_pgn << "[TimeControl \"-\"]\n";
+   else
+      temp_pgn << "[TimeControl \"" << format_tc_seconds(base_time_ms) << "+" << format_tc_seconds(inc_time_ms) << "\"]\n";
    temp_pgn << "[Round \"" << m_game_number << "\"]\n";
    temp_pgn << "[White \"" << white_name << "\"]\n";
    temp_pgn << "[Black \"" << black_name << "\"]\n";
@@ -669,7 +772,10 @@ void GameManager::store_pgn4(game_result result, const string &white_name, const
    temp_pgn << "[RuleVariants \"EnPassant\"]\n";
    int64_t base_time_minutes = (fixed_time_ms.count() || static_clocks_ms.count()) ? 0 : (start_time_ms.count() / 60000);
    int64_t inc_time_ms = fixed_time_ms.count() ? fixed_time_ms.count() : (static_clocks_ms.count() ? static_clocks_ms.count() : increment_ms.count());
-   temp_pgn << "[TimeControl \"" << base_time_minutes << "+" << format_tc_seconds(inc_time_ms) << "\"]\n";
+   if (options.fixed_depth > 0)
+      temp_pgn << "[TimeControl \"-\"]\n";
+   else
+      temp_pgn << "[TimeControl \"" << base_time_minutes << "+" << format_tc_seconds(inc_time_ms) << "\"]\n";
    temp_pgn << "[Round \"" << m_game_number << "\"]\n";
    temp_pgn << "[Red \"" << white_name << "\"]\n";
    temp_pgn << "[Blue \"" << black_name << "\"]\n";

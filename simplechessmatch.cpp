@@ -17,6 +17,10 @@ MatchManager match_mgr;
 
 static string resume_filename;
 
+// Per-move search cap used by depth-limited matches when --fixed is not given.
+// Use --fixed to choose a different cap.
+static constexpr uint DEPTH_DEFAULT_FIXED_MS = 10 * 60 * 1000;
+
 int main(int argc, char* argv[])
 {
    cout << "simplechessmatch\n";
@@ -47,6 +51,9 @@ int main(int argc, char* argv[])
       options.autosave_filename = resume_filename;
       cout << "Resuming match from " << resume_filename << "\n";
    }
+
+   if ((options.fixed_depth > 0) && (options.tc_fixed_time_move_ms == 0))
+      options.tc_fixed_time_move_ms = DEPTH_DEFAULT_FIXED_MS;
 
    if (match_mgr.initialize() == 0)
       return 0;
@@ -195,8 +202,11 @@ void MatchManager::main_loop(void)
          if (_kbhit())
             return;
          for (uint i = 0; i < options.num_threads; i++)
+         {
+            m_game_mgr[i].enforce_fixed_time_limit();
             if (m_game_mgr[i].m_engine_disconnected || m_game_mgr[i].is_engine_unresponsive() || (!options.continue_on_error && m_game_mgr[i].m_error))
                return;
+         }
       }
    }
 
@@ -274,6 +284,17 @@ int MatchManager::initialize(void)
          cout << "Error: could not open FEN file " << options.fens_filename << "\n";
          return 0;
       }
+
+      // --fenoffset: skip the first N positions.
+      for (uint i = 0; i < options.fens_offset; i++)
+      {
+         string skipped_fen;
+         if (!getline(m_FENs_file, skipped_fen))
+         {
+            cout << "Error: --fenoffset " << options.fens_offset << " is larger than the number of FENs in " << options.fens_filename << "\n";
+            return 0;
+         }
+      }
    }
 
    if (!options.pgn_filename.empty() && !options.pgn4_filename.empty())
@@ -320,7 +341,14 @@ int MatchManager::initialize(void)
    for (uint i = 0; i < options.num_threads; i++)
       m_game_mgr[i].m_match_mgr = this;
 
-   if (options.tc_fixed_time_move_ms > 0)
+   if (options.fixed_depth > 0)
+   {
+      m_tc_str = "depth " + to_string(options.fixed_depth);
+      if (options.tc_fixed_time_move_ms > 0)
+         m_tc_str += " (max " + (((options.tc_fixed_time_move_ms % 1000) == 0) ? to_string(options.tc_fixed_time_move_ms / 1000) + "s" :
+                                                                              to_string(options.tc_fixed_time_move_ms) + "ms") + " per move)";
+   }
+   else if (options.tc_fixed_time_move_ms > 0)
       m_tc_str = ((options.tc_fixed_time_move_ms % 1000) == 0) ? to_string(options.tc_fixed_time_move_ms / 1000) + "s fixed" :
                                                                to_string(options.tc_fixed_time_move_ms) + "ms fixed";
    else if (options.tc_static_clocks_ms > 0)
@@ -717,7 +745,13 @@ void MatchManager::print_extended_results(AggregatedResults &r)
 
       if (m_sprt_enabled) {
          stringstream tc_ss;
-         if (options.tc_fixed_time_move_ms > 0)
+         if (options.fixed_depth > 0)
+         {
+            tc_ss << "depth " << options.fixed_depth;
+            if (options.tc_fixed_time_move_ms > 0)
+               tc_ss << " max " << fixed << setprecision(2) << (float)options.tc_fixed_time_move_ms / 1000.0 << "s";
+         }
+         else if (options.tc_fixed_time_move_ms > 0)
             tc_ss << fixed << setprecision(2) << (float)options.tc_fixed_time_move_ms / 1000.0 << "s";
          else if (options.tc_static_clocks_ms > 0)
             tc_ss << fixed << setprecision(2) << (float)options.tc_static_clocks_ms / 1000.0 << "s static clocks";
@@ -801,6 +835,8 @@ void MatchManager::print_final_results(void)
    cout.imbue(locale(cout.getloc(), new comma_numpunct()));
 
    string fens_str = options.fens_filename.empty() ? "none" : options.fens_filename;
+   if (!options.fens_filename.empty() && options.fens_offset > 0)
+      fens_str += " (offset " + to_string(options.fens_offset) + ")";
 
    int match_runtime_s = m_restore.active_runtime_s + (int)chrono::duration_cast<chrono::seconds>(chrono::steady_clock::now() - m_session_start_time).count();
    string dur_str = format_time_duration(match_runtime_s);
@@ -1277,6 +1313,7 @@ int MatchManager::read_restore_data(const string &filename, options_info &saved_
    saved_opts.tc_inc_ms            = o.get<uint>("tc_inc_ms", 100);
    saved_opts.tc_fixed_time_move_ms = o.get<uint>("tc_fixed_time_move_ms", 0);
    saved_opts.tc_static_clocks_ms = o.get<uint>("tc_static_clocks_ms", 0);
+   saved_opts.fixed_depth          = o.get<uint>("fixed_depth", 0);
    saved_opts.margin_ms            = o.get<uint>("margin_ms", 50);
    saved_opts.timeodds_1           = o.get<double>("timeodds_1", 1.0);
    saved_opts.timeodds_2           = o.get<double>("timeodds_2", 1.0);
@@ -1284,6 +1321,7 @@ int MatchManager::read_restore_data(const string &filename, options_info &saved_
    saved_opts.num_threads          = o.get<uint>("num_threads", 1);
    saved_opts.max_moves            = o.get<uint>("max_moves", 1000);
    saved_opts.fens_filename        = o.get<string>("fens_filename", "");
+   saved_opts.fens_offset          = o.get<uint>("fens_offset", 0);
    saved_opts.variant              = o.get<string>("variant", "");
    saved_opts.pgn_filename         = o.get<string>("pgn_filename", "");
    saved_opts.pgn4_filename        = o.get<string>("pgn4_filename", "");
@@ -1531,6 +1569,7 @@ void output_options(ostringstream &oss)
    oss << "      \"tc_inc_ms\": " << options.tc_inc_ms << ",\n";
    oss << "      \"tc_fixed_time_move_ms\": " << options.tc_fixed_time_move_ms << ",\n";
    oss << "      \"tc_static_clocks_ms\": " << options.tc_static_clocks_ms << ",\n";
+   oss << "      \"fixed_depth\": " << options.fixed_depth << ",\n";
    oss << "      \"margin_ms\": " << options.margin_ms << ",\n";
    oss << "      \"timeodds_1\": " << options.timeodds_1 << ",\n";
    oss << "      \"timeodds_2\": " << options.timeodds_2 << ",\n";
@@ -1538,6 +1577,7 @@ void output_options(ostringstream &oss)
    oss << "      \"num_threads\": " << options.num_threads << ",\n";
    oss << "      \"max_moves\": " << options.max_moves << ",\n";
    oss << "      \"fens_filename\": \"" << json_escape(options.fens_filename) << "\",\n";
+   oss << "      \"fens_offset\": " << options.fens_offset << ",\n";
    oss << "      \"variant\": \"" << options.variant << "\",\n"; // json_escape not needed, since variant names don't have special characters.
    oss << "      \"pgn_filename\": \"" << json_escape(options.pgn_filename) << "\",\n";
    oss << "      \"pgn4_filename\": \"" << json_escape(options.pgn4_filename) << "\",\n";
@@ -1550,6 +1590,13 @@ void output_options(ostringstream &oss)
    oss << "      \"sprt_alpha\": " << options.sprt_alpha << ",\n";
    oss << "      \"sprt_beta\": " << options.sprt_beta << "\n";
    oss << "   }\n";
+}
+
+// Returns true if the option was explicitly supplied on the command line.
+static bool explicitly_given(const po::variables_map &var_map, const string &name)
+{
+   auto it = var_map.find(name);
+   return (it != var_map.end()) && !it->second.defaulted();
 }
 
 int parse_cmd_line_options(int argc, char* argv[])
@@ -1610,6 +1657,7 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("inc",        po::value<uint>(&options.tc_inc_ms)->default_value(100), "time control increment (ms)")
          ("fixed",      po::value<uint>(&options.tc_fixed_time_move_ms)->default_value(0), "time control fixed time per move (ms). This must be set to 0, unless engines should simply use a fixed amount of time per move.")
          ("staticclocks", po::value<uint>(&options.tc_static_clocks_ms)->default_value(0), "For debugging only: static clocks time per move (ms). Engines receive the same wtime/btime (rtime/btime/ytime/gtime for 4PC, time/otim for xboard) on every move.")
+         ("depth",      po::value<uint>(&options.fixed_depth)->default_value(0), "fixed search depth per move for depth-limited matches. Cannot be combined with --tc, --inc, --staticclocks, --timeodds1 or --timeodds2. Allowed time per move is capped at 600000 ms (10 minutes) unless --fixed is given.")
          ("margin",     po::value<uint>(&options.margin_ms)->default_value(50), "An engine loses on time if its clock goes below zero for this amount of time (ms).")
          ("timeodds1",  po::value<double>(&options.timeodds_1)->default_value(1.0, "1.0"), "first engine time odds: e.g. set to 2.0 to give 1st engine 2x time (affects base / increment / fixed / staticclocks time control values)")
          ("timeodds2",  po::value<double>(&options.timeodds_2)->default_value(1.0, "1.0"), "second engine time odds")
@@ -1621,6 +1669,7 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("drawscore",  po::value<uint>(&options.draw_score)->default_value(25), "drawscore (centipawns) value for \"earlydraw\" setting")
          ("drawmoves",  po::value<uint>(&options.draw_moves)->default_value(20), "drawmoves value for \"earlydraw\" setting")
          ("fens",       po::value<string>(&options.fens_filename), "file containing FENs for opening positions (one FEN per line)")
+         ("fenoffset",  po::value<uint>(&options.fens_offset)->default_value(0), "skip the first N positions in the FENs file.")
          ("variant",    po::value<string>(&options.variant), "variant name")
          ("4pc",        "enable 4 player chess (teams) mode")
          ("legacy-clocks", "use legacy 2-clock system instead of independent 4-player clocks")
@@ -1647,6 +1696,27 @@ int parse_cmd_line_options(int argc, char* argv[])
       {
          cout << desc << "\n";
          return 0;
+      }
+
+      if (explicitly_given(var_map, "depth"))
+      {
+         if (options.fixed_depth == 0)
+         {
+            cerr << "error: --depth must be at least 1\n";
+            return 0;
+         }
+
+         // Fixed depth matches are not time controlled. "--fixed" is allowed as a per-move time limit
+         // (the engine is told to move immediately when it exceeds that time).
+         const char *tc_options[] = {"tc", "inc", "staticclocks", "timeodds1", "timeodds2"};
+         for (int i = 0; i < (int)(sizeof(tc_options) / sizeof(tc_options[0])); i++)
+         {
+            if (explicitly_given(var_map, tc_options[i]))
+            {
+               cerr << "error: --depth cannot be used together with --" << tc_options[i] << "\n";
+               return 0;
+            }
+         }
       }
 
       bool has_resume = false, has_other = false;

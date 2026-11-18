@@ -72,6 +72,13 @@ To compile, Boost library must be installed.
                                         wtime/btime (rtime/btime/ytime/gtime
                                         for 4PC, time/otim for xboard) on every
                                         move.
+  --depth arg (=0)                      fixed search depth per move for
+                                        depth-limited matches. Cannot be
+                                        combined with --tc, --inc,
+                                        --staticclocks, --timeodds1 or
+                                        --timeodds2. Allowed time per move is
+                                        capped at 600000 ms (10 minutes) unless
+                                        --fixed is given.
   --margin arg (=50)                    An engine loses on time if its clock
                                         goes below zero for this amount of time
                                         (ms).
@@ -96,6 +103,8 @@ To compile, Boost library must be installed.
   --drawmoves arg (=20)                 drawmoves value for "earlydraw" setting
   --fens arg                            file containing FENs for opening
                                         positions (one FEN per line)
+  --fenoffset arg (=0)                  skip the first N positions in the FENs
+                                        file.
   --variant arg                         variant name
   --4pc                                 enable 4 player chess (teams) mode
   --legacy-clocks                       use legacy 2-clock system instead of
@@ -111,8 +120,8 @@ To compile, Boost library must be installed.
                                         (if file exists it will be overwritten)
   --pgnclocks                           write clock comments ({[%clk
                                         H:MM:SS.d]}) into PGN and PGN4 output
-  --compact                             compact single-line status output
-                                        with detailed match statistics
+  --compact                             compact single-line status output with
+                                        detailed match statistics
   --sprt                                Enable SPRT test. Test stops when
                                         bounds are reached.
   --sprt-elo-model arg (=normalized)    SPRT Elo model ('normalized' or

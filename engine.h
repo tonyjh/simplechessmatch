@@ -14,6 +14,8 @@
 #include <cctype>
 #include <sstream>
 #include <iomanip>
+#include <atomic>
+#include <mutex>
 
 #define ABS(a)                (((a) > 0) ? (a) : (0 - (a)))
 
@@ -80,7 +82,7 @@ public:
    string m_file_name;
    string m_name;
    string m_move;
-   bool m_is_ready;
+   atomic<bool> m_is_ready;
    bool m_quit_cmd_sent;
    bool m_resigned;
    bool m_offered_draw;
@@ -104,6 +106,8 @@ private:
    bool m_xb_feature_usermove;      // xboard only
    bool m_xb_force_mode;            // xboard only
    bool m_debug;
+
+   std::mutex m_cmd_mutex;          // serializes writes to m_in_stream from multiple threads
 
    int m_mate_score;                // score threshold used to identify mate scores
    int m_mate_score_neg;            // negative mate score threshold
@@ -182,6 +186,7 @@ struct options_info
    uint tc_inc_ms;
    uint tc_fixed_time_move_ms;
    uint tc_static_clocks_ms;
+   uint fixed_depth;              // fixed search depth per move (0 = use time control)
    uint margin_ms;
    double timeodds_1;
    double timeodds_2;
@@ -189,6 +194,7 @@ struct options_info
    uint num_threads;
    uint max_moves;
    string fens_filename;
+   uint fens_offset;
    string variant;
    string pgn_filename;
    string pgn4_filename;

@@ -128,8 +128,13 @@ void Engine::send_engine_cmd(const string &cmd)
    {
       if (m_debug)
          cout << "TO ENGINE " << m_ID << ": " << cmd << "\n";
-      m_in_stream << cmd << "\n";
-      m_in_stream.flush();
+      // The game thread and the monitor thread (which may inject "stop"/"?") both write to the
+      // engine's stdin, so serialize complete command lines.
+      {
+         lock_guard<mutex> lock(m_cmd_mutex);
+         m_in_stream << cmd << "\n";
+         m_in_stream.flush();
+      }
    }
 }
 
@@ -250,7 +255,12 @@ int Engine::engine_new_game_setup(player_color color, player_color turn, int64_t
 
       send_engine_cmd("easy");
       send_engine_cmd("post");
-      if (fixed_time_ms)
+      if (options.fixed_depth > 0)
+      {
+         // Fixed depth match: xboard engines limit the search with "sd" and get no clock information.
+         send_engine_cmd("sd " + to_string(options.fixed_depth));
+      }
+      else if (fixed_time_ms)
       {
          if ((fixed_time_ms % 1000) == 0)
             send_engine_cmd("st " + to_string((fixed_time_ms) / 1000));
@@ -300,7 +310,9 @@ void Engine::engine_new_game_start(int64_t start_time_ms, int64_t inc_time_ms, i
 {
    if (m_uci)
    {
-      if (fixed_time_ms != 0)
+      if (options.fixed_depth > 0)
+         send_engine_cmd("go depth " + to_string(options.fixed_depth));
+      else if (fixed_time_ms != 0)
          send_engine_cmd("go movetime " + to_string(fixed_time_ms));
       else if (static_clocks_ms != 0)
       {
@@ -514,7 +526,9 @@ void Engine::send_move_and_clocks_to_engine(const string &move, const string &st
       else
          send_engine_cmd("position fen " + startfen + " moves " + movelist);
 
-      if (fixed_time_ms == 0 && static_clocks_ms == 0)
+      if (options.fixed_depth > 0)
+         send_engine_cmd("go depth " + to_string(options.fixed_depth));
+      else if (fixed_time_ms == 0 && static_clocks_ms == 0)
       {
          if (options.fourplayerchess && !options.legacy_clocks)
             send_engine_cmd("go rtime " + to_string(player_clocks_ms[RED]) + " btime " + to_string(player_clocks_ms[BLUE]) +
@@ -540,28 +554,33 @@ void Engine::send_move_and_clocks_to_engine(const string &move, const string &st
    }
    else
    {
-      if (fixed_time_ms == 0 && static_clocks_ms == 0)
+      // In a fixed depth match the search depth was already set with "sd" at game setup,
+      // so no clock information is sent to xboard engines.
+      if (options.fixed_depth == 0)
       {
-         if (options.fourplayerchess && !options.legacy_clocks)
+         if (fixed_time_ms == 0 && static_clocks_ms == 0)
          {
-            send_engine_cmd("time " + to_string(player_clocks_ms[(turn_4pc + 1) % 4] / 10));
-            send_engine_cmd("otim " + to_string(player_clocks_ms[turn_4pc] / 10));
+            if (options.fourplayerchess && !options.legacy_clocks)
+            {
+               send_engine_cmd("time " + to_string(player_clocks_ms[(turn_4pc + 1) % 4] / 10));
+               send_engine_cmd("otim " + to_string(player_clocks_ms[turn_4pc] / 10));
+            }
+            else
+            {
+               send_engine_cmd("time " + to_string(player_clocks_ms[m_color] / 10));
+               send_engine_cmd("otim " + to_string(player_clocks_ms[1 - m_color] / 10));
+            }
+         }
+         else if (static_clocks_ms != 0)
+         {
+            send_engine_cmd("time " + to_string(static_clocks_ms / 10));
+            send_engine_cmd("otim " + to_string(static_clocks_ms / 10));
          }
          else
          {
-            send_engine_cmd("time " + to_string(player_clocks_ms[m_color] / 10));
-            send_engine_cmd("otim " + to_string(player_clocks_ms[1 - m_color] / 10));
+            send_engine_cmd("time " + to_string(fixed_time_ms / 10));
+            send_engine_cmd("otim " + to_string(fixed_time_ms / 10));
          }
-      }
-      else if (static_clocks_ms != 0)
-      {
-         send_engine_cmd("time " + to_string(static_clocks_ms / 10));
-         send_engine_cmd("otim " + to_string(static_clocks_ms / 10));
-      }
-      else
-      {
-         send_engine_cmd("time " + to_string(fixed_time_ms / 10));
-         send_engine_cmd("otim " + to_string(fixed_time_ms / 10));
       }
       if (m_xb_feature_usermove)
          send_engine_cmd("usermove " + move);
