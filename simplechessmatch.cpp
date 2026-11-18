@@ -440,7 +440,7 @@ void MatchManager::send_engine_custom_commands(Engine *engine)
 void MatchManager::log_error_message(int game_number, const std::string& msg)
 {
    lock_guard<mutex> lock(m_output_mutex);
-   if (simple_output_mode()) {
+   if (line_output_mode()) {
       if (game_number != 0)
          cout << "Game " << game_number << ": " << msg;
       else
@@ -575,10 +575,9 @@ void MatchManager::print_results(void)
 
    AggregatedResults r = aggregate_results();
 
-   if (!simple_output_mode())
+   if (!line_output_mode())
       reset_cursor();
 
-   double elo_diff = (r.total_games > 0) ? log10(1.0 / r.engine_score[SECOND] - 1.0) * 400.0 : 0.0;
    string name1 = filename_from_path(options.engine_file_name_1);
    string name2 = filename_from_path(options.engine_file_name_2);
    if (options.timeodds_1 != 1.0)
@@ -586,12 +585,18 @@ void MatchManager::print_results(void)
    if (options.timeodds_2 != 1.0)
       name2 = name2 + "(timeodds=" + format_float(options.timeodds_2) + ")";
 
+   if (options.compact_output)
+   {
+      print_compact_results(name1, name2, r);
+      print_error_messages(false);
+      return;
+   }
+
    cout << "[Games " << total_games_completed << "/" << options.num_games_to_play << "]  "
         << "[" << name1 << " vs " << name2 << "]  "
         << "[" << m_tc_str << "]  "
         << "W1:" << r.wins[FIRST] << "  W2:" << r.wins[SECOND] << "  D:" << r.draws
-        << "  " << fixed << setprecision(1) << 100.0 * r.engine_score[FIRST] << "%"
-        << "  Elo " << showpos << setprecision(2) << elo_diff << noshowpos;
+        << "  " << fixed << setprecision(1) << 100.0 * r.engine_score[FIRST] << "%";
 
    if (r.illegal_move_games != 0)
       cout << "  [illegal:" << r.illegal_move_games << "]";
@@ -601,10 +606,92 @@ void MatchManager::print_results(void)
    cout << "\n";
    m_lines_printed++;
 
-   if (!options.simple_output)
-      print_extended_results(r);
+   print_extended_results(r);
 
    print_error_messages(false);
+}
+
+static string format_compact_duration(int duration_seconds)
+{
+   int hours = duration_seconds / 3600;
+   int minutes = (duration_seconds % 3600) / 60;
+   if (hours > 0)
+      return to_string(hours) + "h " + to_string(minutes) + "m";
+   if (minutes > 0)
+      return to_string(minutes) + "m";
+   return to_string(duration_seconds % 60) + "s";
+}
+
+static string format_rate(double rate)
+{
+   ostringstream oss;
+   if (rate >= 1e9)
+      oss << fixed << setprecision(2) << rate / 1e9 << "G";
+   else if (rate >= 1e6)
+      oss << fixed << setprecision(2) << rate / 1e6 << "M";
+   else if (rate >= 1e3)
+      oss << fixed << setprecision(1) << rate / 1e3 << "k";
+   else
+      oss << fixed << setprecision(0) << rate;
+   return oss.str();
+}
+
+void MatchManager::print_compact_results(const string &name1, const string &name2, AggregatedResults &r)
+{
+   EloInfo elo_info;
+   if (m_completed_pairs > 0)
+      elo_info = calculate_elo();
+
+   int games_completed = m_total_games_started - num_games_in_progress();
+
+   int eta_s = estimate_eta_s(r);
+
+   ostringstream cs;
+
+   cs << "[Games " << games_completed << "/" << options.num_games_to_play << "]"
+      << "  [" << name1 << " vs " << name2 << "]"
+      << "  [" << m_tc_str << "]"
+      << " | pairs=" << m_completed_pairs << "/" << options.num_games_to_play / 2
+      << " w1=" << r.wins[FIRST] << " w2=" << r.wins[SECOND] << " d=" << r.draws
+      << " penta=" << m_penta[0] << "/" << m_penta[1] << "/" << m_penta[2]
+      << "/" << m_penta[3] << "/" << m_penta[4];
+
+   if (m_completed_pairs > 0)
+   {
+      cs << " elo=" << fixed << setprecision(1);
+      if (elo_info.elo_diff >= 1e9)
+         cs << "+inf";
+      else if (elo_info.elo_diff <= -1e9)
+         cs << "-inf";
+      else
+         cs << showpos << elo_info.elo_diff << noshowpos;
+      cs << " ci=" << elo_info.elo_margin
+         << " los=" << elo_info.los << "%";
+   }
+
+   cs << " tf=" << r.losses_on_time[FIRST] << "/" << r.losses_on_time[SECOND]
+      << " il=" << r.illegal_move_games
+      << " nps=" << format_rate(r.nps[FIRST]) << "/" << format_rate(r.nps[SECOND])
+      << " dep=" << r.avg_depth[FIRST] << "/" << r.avg_depth[SECOND]
+      << " eta=" << ((eta_s >= 0) ? format_compact_duration(eta_s) : string("n/a"));
+
+   cout << cs.str() << "\n";
+   m_lines_printed++;
+}
+
+int MatchManager::estimate_eta_s(AggregatedResults &r)
+{
+   // Rough estimate of the time left in the match, based on the average wall-clock
+   // game duration so far and the number of games still to play (per thread).
+   // Skipped for SPRT and effectively unbounded matches, where the target is not meaningful.
+   // Returns -1 when no estimate is available.
+   int remaining_games = (int)options.num_games_to_play - (int)r.total_games;
+   if (!m_sprt_enabled && (options.num_games_to_play < 1000000) && (remaining_games > 0) && (r.avg_game_duration > 0.0))
+   {
+      double eta_s = r.avg_game_duration * (double)remaining_games / (double)max(1u, options.num_threads);
+      return (int)min(eta_s, 2000000000.0);
+   }
+   return -1;
 }
 
 void MatchManager::print_extended_results(AggregatedResults &r)
@@ -625,7 +712,8 @@ void MatchManager::print_extended_results(AggregatedResults &r)
 
       ss_output << "Elo   | " << elo_info.elo_str << endl;
       ss_output << "nElo  | " << elo_info.nElo_str << endl;
-      m_lines_printed += 2;
+      ss_output << "LOS   | " << elo_info.los_str << endl;
+      m_lines_printed += 3;
 
       if (m_sprt_enabled) {
          stringstream tc_ss;
@@ -651,16 +739,8 @@ void MatchManager::print_extended_results(AggregatedResults &r)
 
    ss_output << endl << "Session Stats:" << endl;
 
-   // Rough estimate of the time left in the match, based on the average wall-clock
-   // game duration so far and the number of games still to play (per thread).
-   // Skipped for SPRT and effectively unbounded matches, where the target is not meaningful.
-   int remaining_games = (int)options.num_games_to_play - (int)r.total_games;
-   string eta_str = "n/a";
-   if (!m_sprt_enabled && (options.num_games_to_play < 1000000) && (remaining_games > 0) && (r.avg_game_duration > 0.0))
-   {
-      double eta_s = r.avg_game_duration * (double)remaining_games / (double)max(1u, options.num_threads);
-      eta_str = format_time_duration((int)min(eta_s, 2000000000.0));
-   }
+   int eta_s = estimate_eta_s(r);
+   string eta_str = (eta_s >= 0) ? format_time_duration(eta_s) : "n/a";
 
    ss_output << "Stats | avg_plies=" << fixed << setprecision(1) << r.avg_plies_per_game
              << " avg_dur=" << r.avg_game_duration << "s run_time=" << runtime_str
@@ -748,9 +828,13 @@ void MatchManager::print_final_results(void)
    cout << "  " << left << setw(lw) << "" << right << setw(vw) << "----------------------" << setw(vw) << "----------------------" << "\n";
    cout << "  " << left << setw(lw) << "Score %" << right << setw(vw - 1) << fixed << setprecision(1) << 100.0 * r.engine_score[FIRST] << "%" << setw(vw - 1) << fixed << setprecision(1) << 100.0 * r.engine_score[SECOND] << "%\n";
    cout << "  " << left << setw(lw) << "W / D / L" << right << setw(vw) << (to_string(r.wins[FIRST]) + " / " + to_string(r.draws) + " / " + to_string(r.wins[SECOND])) << setw(vw) << (to_string(r.wins[SECOND]) + " / " + to_string(r.draws) + " / " + to_string(r.wins[FIRST])) << "\n";
+   cout << "  " << left << setw(lw) << "Penta (0/1/2/3/4)" << right << setw(vw)
+        << (to_string(m_penta[0]) + " " + to_string(m_penta[1]) + " " + to_string(m_penta[2])
+            + " " + to_string(m_penta[3]) + " " + to_string(m_penta[4])) << "\n";
    cout << "  " << left << setw(lw) << "Elo (classical)" << right << setw(vw) << showpos << setprecision(2) << elo_diff << noshowpos << "\n";
    cout << "  " << left << setw(lw) << "Elo (game pairs, 95% CI)" << right << setw(vw) << elo_info.elo_str << "\n";
    cout << "  " << left << setw(lw) << "Elo (normalized, 95% CI)" << right << setw(vw) << elo_info.nElo_str << "\n";
+   cout << "  " << left << setw(lw) << "LOS (likelihood E1 superior)" << right << setw(vw) << elo_info.los_str << "\n";
    cout << "\n";
 
    cout << "CURRENT SESSION STATISTICS\n";
@@ -841,8 +925,10 @@ EloInfo MatchManager::calculate_elo(void)
       elo_info.elo_margin = 0.0;
       elo_info.nElo_diff = 0.0;
       elo_info.nElo_margin = 0.0;
+      elo_info.los = 0.0;
       elo_info.elo_str = "";
       elo_info.nElo_str = "";
+      elo_info.los_str = "";
       return elo_info;
    }
 
@@ -858,14 +944,27 @@ EloInfo MatchManager::calculate_elo(void)
       var_pair_avg += p[k] * diff * diff;
    }
 
+   // Bessel's correction: the sum above is the plug-in variance (denominator N).
+   // Scale it to the unbiased sample variance (denominator N - 1) before using
+   // it for the standard errors. A single pair carries no variance information.
+   if (m_completed_pairs > 1)
+      var_pair_avg *= (double)m_completed_pairs / (double)(m_completed_pairs - 1);
+
+   double std_error_of_mean_score = sqrt(var_pair_avg / m_completed_pairs);
+
+   // Likelihood of Superiority (LOS): the probability that engine 1's true score
+   // exceeds 50%, using the normal approximation with the sample standard error.
+   if (std_error_of_mean_score > 1e-12)
+      elo_info.los = 100.0 * 0.5 * (1.0 + erf((score - 0.5) / (std_error_of_mean_score * sqrt(2.0))));
+   else
+      elo_info.los = (score > 0.5) ? 100.0 : ((score < 0.5) ? 0.0 : 50.0);
+
    if (score <= 1e-9 || score >= 1.0 - 1e-9) {
       elo_info.elo_diff = score > 0.5 ? 1e9 : -1e9;
       elo_info.elo_margin = 0.0;
       elo_info.nElo_diff = score > 0.5 ? 1e9 : -1e9;
       elo_info.nElo_margin = 0.0;
    } else {
-      double std_error_of_mean_score = sqrt(var_pair_avg / m_completed_pairs);
-
       // 1. Classical / Logistic Elo (Exact bounds calculation)
       auto to_elo = [](double s) {
           if (s < 1e-5) s = 1e-5;
@@ -889,7 +988,7 @@ EloInfo MatchManager::calculate_elo(void)
       }
    }
 
-   stringstream ss_elo, ss_nElo;
+   stringstream ss_elo, ss_nElo, ss_los;
 
    ss_elo << fixed << setprecision(2);
    if (elo_info.elo_diff >= 1e9)
@@ -907,8 +1006,11 @@ EloInfo MatchManager::calculate_elo(void)
    else
       ss_nElo << showpos << elo_info.nElo_diff << " +- " << noshowpos << elo_info.nElo_margin;
 
+   ss_los << fixed << setprecision(2) << elo_info.los << "%";
+
    elo_info.elo_str = ss_elo.str();
    elo_info.nElo_str = ss_nElo.str();
+   elo_info.los_str = ss_los.str();
 
    return elo_info;
 }
@@ -956,9 +1058,9 @@ void MatchManager::save_pgn(void)
    }
 }
 
-bool MatchManager::simple_output_mode(void)
+bool MatchManager::line_output_mode(void)
 {
-   return (options.simple_output || options.print_moves || options.debug_1 || options.debug_2);
+   return (options.compact_output || options.print_moves || options.debug_1 || options.debug_2);
 }
 
 void MatchManager::add_pair_score(uint pid)
@@ -1158,7 +1260,7 @@ int MatchManager::read_restore_data(const string &filename, options_info &saved_
    saved_opts.debug_2              = get_bool("debug_2", false);
    saved_opts.matescore_1          = o.get<int>("matescore_1", 100000);
    saved_opts.matescore_2          = o.get<int>("matescore_2", 100000);
-   saved_opts.simple_output        = get_bool("simple_output", false);
+   saved_opts.compact_output         = get_bool("compact_output", get_bool("simple_output", false));
    saved_opts.print_moves          = get_bool("print_moves", false);
    saved_opts.continue_on_error    = get_bool("continue_on_error", false);
    saved_opts.force_setboard_1     = get_bool("force_setboard_1", false);
@@ -1412,7 +1514,7 @@ void output_options(ostringstream &oss)
    oss << "      \"debug_2\": " << (options.debug_2 ? "true" : "false") << ",\n";
    oss << "      \"matescore_1\": " << options.matescore_1 << ",\n";
    oss << "      \"matescore_2\": " << options.matescore_2 << ",\n";
-   oss << "      \"simple_output\": " << (options.simple_output ? "true" : "false") << ",\n";
+   oss << "      \"compact_output\": " << (options.compact_output ? "true" : "false") << ",\n";
    oss << "      \"print_moves\": " << (options.print_moves ? "true" : "false") << ",\n";
    oss << "      \"continue_on_error\": " << (options.continue_on_error ? "true" : "false") << ",\n";
    oss << "      \"force_setboard_1\": " << (options.force_setboard_1 ? "true" : "false") << ",\n";
@@ -1527,7 +1629,7 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("pgn",        po::value<string>(&options.pgn_filename), "save games in PGN format to specified file name\n(if file exists it will be overwritten)")
          ("pgn4",       po::value<string>(&options.pgn4_filename), "save games in PGN4 format to specified file name\n(if file exists it will be overwritten)")
          ("pgnclocks",  "write clock comments ({[%clk H:MM:SS.d]}) into PGN and PGN4 output")
-         ("simple",     "simple line-by-line output")
+         ("compact",    "compact single-line status output with detailed match statistics")
          ("sprt",       "Enable SPRT test. Test stops when bounds are reached.")
          ("sprt-elo-model", po::value<string>(&options.sprt_elo_model)->default_value("normalized"), "SPRT Elo model ('normalized' or 'logistic')")
          ("sprt-elo0",  po::value<double>(&options.sprt_elo0)->default_value(0.0, "0.0"), "SPRT H0 (null hypothesis) Elo.")
@@ -1573,7 +1675,7 @@ int parse_cmd_line_options(int argc, char* argv[])
       options.legacy_clocks = (var_map.count("legacy-clocks") != 0);
       options.early_win = (var_map.count("earlywin") != 0);
       options.early_draw = (var_map.count("earlydraw") != 0);
-      options.simple_output = (var_map.count("simple") != 0);
+      options.compact_output = (var_map.count("compact") != 0);
 
       options.sprt_enabled = (var_map.count("sprt") != 0);
       if (options.sprt_elo_model != "normalized" && options.sprt_elo_model != "logistic")

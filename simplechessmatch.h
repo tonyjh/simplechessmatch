@@ -53,8 +53,10 @@ struct EloInfo {
    double elo_margin = 0.0;
    double nElo_diff = 0.0;
    double nElo_margin = 0.0;
+   double los = 0.0; // Likelihood of Superiority (probability E1 is stronger), in percent
    string elo_str;
    string nElo_str;
+   string los_str;
 };
 
 struct PairRecord {
@@ -148,6 +150,7 @@ public:
    void print_final_results(void);
    void print_thread_results(void);
    void print_extended_results(AggregatedResults &r);
+   void print_compact_results(const string &name1, const string &name2, AggregatedResults &r);
    void save_pgn(void);
    void shut_down_all_engines(void);
    void save_match_progress(void);
@@ -158,7 +161,8 @@ private:
    uint num_games_in_progress(void);
    int get_next_fen(string &fen);
    void join_finished_threads(void);
-   bool simple_output_mode(void);
+   bool line_output_mode(void);
+   int estimate_eta_s(AggregatedResults &r);
 
    EloInfo calculate_elo(void);
    AggregatedResults aggregate_results(void);

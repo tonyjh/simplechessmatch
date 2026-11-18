@@ -111,7 +111,8 @@ To compile, Boost library must be installed.
                                         (if file exists it will be overwritten)
   --pgnclocks                           write clock comments ({[%clk
                                         H:MM:SS.d]}) into PGN and PGN4 output
-  --simple                              simple line-by-line output
+  --compact                             compact single-line status output
+                                        with detailed match statistics
   --sprt                                Enable SPRT test. Test stops when
                                         bounds are reached.
   --sprt-elo-model arg (=normalized)    SPRT Elo model ('normalized' or

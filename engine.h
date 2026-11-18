@@ -163,7 +163,7 @@ struct options_info
    vector<string> custom_commands_2;
    bool debug_1;
    bool debug_2;
-   bool simple_output;
+   bool compact_output;
 
    int matescore_1;
    int matescore_2;
