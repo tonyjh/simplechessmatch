@@ -754,6 +754,16 @@ void MatchManager::print_compact_results(const string &name1, const string &name
          << " los=" << elo_info.los << "%";
    }
 
+   if (m_sprt_enabled)
+   {
+      cs << " llr=" << fixed << setprecision(3) << m_sprt_llr
+         << " (" << m_sprt_lower_bound << "/" << m_sprt_upper_bound << ")"
+         << " h0=" << defaultfloat << setprecision(6) << m_sprt_elo0
+         << " h1=" << showpos << m_sprt_elo1 << noshowpos;
+      if (m_sprt_test_finished)
+         cs << " sprt=" << ((m_sprt_decision == SPRT_H1) ? "H1" : "H0");
+   }
+
    cs << " tf=" << r.losses_on_time[FIRST] << "/" << r.losses_on_time[SECOND]
       << " il=" << r.illegal_move_games
       << " nps=" << format_rate(r.nps[FIRST]) << "/" << format_rate(r.nps[SECOND])
