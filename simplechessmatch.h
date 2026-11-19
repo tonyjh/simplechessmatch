@@ -96,6 +96,8 @@ private:
    fstream m_FENs_file;
    fstream m_pgn_file;
    string m_tc_str;
+   string m_stop_reason;
+   chrono::steady_clock::time_point m_last_stopfile_check;
    chrono::steady_clock::time_point m_session_start_time;
 
    vector<PairRecord> m_pair_records;
@@ -158,6 +160,8 @@ public:
 private:
    bool match_completed(void);
    bool new_game_can_start(void);
+   bool stop_requested(void);
+   int64_t match_elapsed_s(void);
    uint num_games_in_progress(void);
    int get_next_fen(string &fen);
    void join_finished_threads(void);

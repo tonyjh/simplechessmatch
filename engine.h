@@ -192,6 +192,11 @@ struct options_info
    double timeodds_2;
    uint num_games_to_play;
    uint num_threads;
+
+   // Stop controls
+   uint max_seconds = 0;
+   string stop_filename = "scm_stop";
+
    uint max_moves;
    string fens_filename;
    uint fens_offset;

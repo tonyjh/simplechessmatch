@@ -19,7 +19,7 @@ static string resume_filename;
 
 // Per-move search cap used by depth-limited matches when --fixed is not given.
 // Use --fixed to choose a different cap.
-static constexpr uint DEPTH_DEFAULT_FIXED_MS = 10 * 60 * 1000;
+static constexpr uint DEPTH_DEFAULT_FIXED_MS = 10 * 60 * 1000; // 10 minutes
 
 int main(int argc, char* argv[])
 {
@@ -159,12 +159,25 @@ void MatchManager::main_loop(void)
 
    m_session_start_time = chrono::steady_clock::now();
 
+   cout << "\n";
+
+   // A stop file left behind by a previous run would stop this match right away.
+   std::error_code stopfile_error;
+   if (!options.stop_filename.empty() &&
+       std::filesystem::is_regular_file(options.stop_filename, stopfile_error) && !stopfile_error)
+      cout << "Warning: stop file \"" << options.stop_filename
+           << "\" already exists; the match will stop immediately. Delete it to continue.\n";
+
    while (!match_completed())
    {
       // 1. Join finished threads and record results
       join_finished_threads();
 
-      // 2. Start new games
+      // 2. Stop if requested (keypress, --maxseconds or --stopfile).
+      if (stop_requested())
+         return;
+
+      // 3. Start new games
       for (uint i = 0; i < options.num_threads; i++)
       {
          if (!new_game_can_start())
@@ -192,14 +205,14 @@ void MatchManager::main_loop(void)
          }
       }
 
-      // 3. Wait until a thread finishes
+      // 4. Wait until a thread finishes
       while (!new_game_can_start() && !match_completed())
       {
          this_thread::sleep_for(200ms);
          join_finished_threads();
          print_results();
          save_pgn();
-         if (_kbhit())
+         if (stop_requested())
             return;
          for (uint i = 0; i < options.num_threads; i++)
          {
@@ -244,6 +257,50 @@ bool MatchManager::new_game_can_start(void)
       return false;
    else
       return ((m_total_games_started < options.num_games_to_play) && (num_games_in_progress() < options.num_threads));
+}
+
+// Total match time, including time restored from a resumed match.
+int64_t MatchManager::match_elapsed_s(void)
+{
+   return m_restore.active_runtime_s + (int64_t)chrono::duration_cast<chrono::seconds>(
+      chrono::steady_clock::now() - m_session_start_time).count();
+}
+
+// Stop match: a key was pressed, --maxseconds elapsed, or the --stopfile
+// appeared. Ends the match through the normal shutdown path (autosave, PGN and
+// results are still written); games still in progress are abandoned.
+bool MatchManager::stop_requested(void)
+{
+   if (!m_stop_reason.empty())
+      return true;
+
+   if (options.max_seconds > 0)
+   {
+      if (match_elapsed_s() >= (int64_t)options.max_seconds)
+         m_stop_reason = "--maxseconds " + to_string(options.max_seconds) + " reached";
+   }
+
+   // Checking the stop file touches the file system, so only probe it about once per second.
+   if (m_stop_reason.empty() && !options.stop_filename.empty())
+   {
+      auto now = chrono::steady_clock::now();
+      if ((now - m_last_stopfile_check) >= 1000ms)
+      {
+         m_last_stopfile_check = now;
+         std::error_code exists_error;
+         if (std::filesystem::is_regular_file(options.stop_filename, exists_error) && !exists_error)
+            m_stop_reason = "stop file \"" + options.stop_filename + "\" found";
+      }
+   }
+
+   if (m_stop_reason.empty() && _kbhit())
+      m_stop_reason = "key pressed";
+
+   if (m_stop_reason.empty())
+      return false;
+
+   cout << "\n***** Stopping match (" << m_stop_reason << ") *****\n";
+   return true;
 }
 
 uint MatchManager::num_games_in_progress(void)
@@ -700,7 +757,7 @@ void MatchManager::print_compact_results(const string &name1, const string &name
    cs << " tf=" << r.losses_on_time[FIRST] << "/" << r.losses_on_time[SECOND]
       << " il=" << r.illegal_move_games
       << " nps=" << format_rate(r.nps[FIRST]) << "/" << format_rate(r.nps[SECOND])
-      << " dep=" << r.avg_depth[FIRST] << "/" << r.avg_depth[SECOND]
+      << " dep=" << fixed << setprecision(2) << r.avg_depth[FIRST] << "/" << r.avg_depth[SECOND]
       << " eta=" << ((eta_s >= 0) ? format_compact_duration(eta_s) : string("n/a"));
 
    cout << cs.str() << "\n";
@@ -709,17 +766,25 @@ void MatchManager::print_compact_results(const string &name1, const string &name
 
 int MatchManager::estimate_eta_s(AggregatedResults &r)
 {
-   // Rough estimate of the time left in the match, based on the average wall-clock
-   // game duration so far and the number of games still to play (per thread).
-   // Skipped for SPRT and effectively unbounded matches, where the target is not meaningful.
+   // Upper bound on the remaining match time. The game target caps the number
+   // of games, and --maxseconds caps the elapsed time; SPRT (and the stop file)
+   // may end the match earlier than either limit.
    // Returns -1 when no estimate is available.
    int remaining_games = (int)options.num_games_to_play - (int)r.total_games;
-   if (!m_sprt_enabled && (options.num_games_to_play < 1000000) && (remaining_games > 0) && (r.avg_game_duration > 0.0))
+   bool has_game_target = (options.num_games_to_play < 1000000) && (remaining_games > 0) && (r.avg_game_duration > 0.0);
+
+   int eta_s = -1;
+   if (has_game_target)
+      eta_s = (int)min(r.avg_game_duration * (double)remaining_games / (double)max(1u, options.num_threads), 2000000000.0);
+
+   if (options.max_seconds > 0)
    {
-      double eta_s = r.avg_game_duration * (double)remaining_games / (double)max(1u, options.num_threads);
-      return (int)min(eta_s, 2000000000.0);
+      int64_t budget_left_s = (int64_t)options.max_seconds - match_elapsed_s();
+      int budget_eta_s = (int)max<int64_t>(0, min<int64_t>(budget_left_s, 2000000000));
+      eta_s = (eta_s < 0) ? budget_eta_s : min(eta_s, budget_eta_s);
    }
-   return -1;
+
+   return eta_s;
 }
 
 void MatchManager::print_extended_results(AggregatedResults &r)
@@ -821,6 +886,13 @@ static string engine_table_label(const string &tag, const string &name, size_t w
 
 void MatchManager::print_final_results(void)
 {
+   if (m_total_games_started == 0)
+   {
+      // Nothing was ever played. Just print error messages, if any.
+      print_error_messages(true);
+      return;
+   }
+
    AggregatedResults r = aggregate_results();
    EloInfo elo_info = calculate_elo();
 
@@ -917,6 +989,12 @@ void MatchManager::print_final_results(void)
 
 void MatchManager::print_thread_results(void)
 {
+   uint games_completed = 0;
+   for (uint i = 0; i < options.num_threads; i++)
+      games_completed += m_game_mgr[i].m_wins[FIRST] + m_game_mgr[i].m_wins[SECOND] + m_game_mgr[i].m_draws;
+   if (games_completed == 0)
+      return;
+
    int lw = 10;  // thread number width
    int ww = 8;   // wins/draws width
    int sw = 12;  // score width
@@ -1319,6 +1397,8 @@ int MatchManager::read_restore_data(const string &filename, options_info &saved_
    saved_opts.timeodds_2           = o.get<double>("timeodds_2", 1.0);
    saved_opts.num_games_to_play    = o.get<uint>("num_games_to_play", 1000000);
    saved_opts.num_threads          = o.get<uint>("num_threads", 1);
+   saved_opts.max_seconds          = o.get<uint>("max_seconds", 0);
+   saved_opts.stop_filename        = o.get<string>("stop_filename", "scm_stop");
    saved_opts.max_moves            = o.get<uint>("max_moves", 1000);
    saved_opts.fens_filename        = o.get<string>("fens_filename", "");
    saved_opts.fens_offset          = o.get<uint>("fens_offset", 0);
@@ -1575,6 +1655,8 @@ void output_options(ostringstream &oss)
    oss << "      \"timeodds_2\": " << options.timeodds_2 << ",\n";
    oss << "      \"num_games_to_play\": " << options.num_games_to_play << ",\n";
    oss << "      \"num_threads\": " << options.num_threads << ",\n";
+   oss << "      \"max_seconds\": " << options.max_seconds << ",\n";
+   oss << "      \"stop_filename\": \"" << json_escape(options.stop_filename) << "\",\n";
    oss << "      \"max_moves\": " << options.max_moves << ",\n";
    oss << "      \"fens_filename\": \"" << json_escape(options.fens_filename) << "\",\n";
    oss << "      \"fens_offset\": " << options.fens_offset << ",\n";
@@ -1663,6 +1745,8 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("timeodds2",  po::value<double>(&options.timeodds_2)->default_value(1.0, "1.0"), "second engine time odds")
          ("games",      po::value<uint>(&options.num_games_to_play)->default_value(1000000), "total number of games to play")
          ("threads",    po::value<uint>(&options.num_threads)->default_value(1), "number of concurrent games to run")
+         ("maxseconds", po::value<uint>(&options.max_seconds)->default_value(0), "stop the match after this many seconds (0 = no limit)")
+         ("stopfile",   po::value<string>(&options.stop_filename)->default_value("scm_stop"), "stop the match when a file with this name appears (default: scm_stop)")
          ("maxmoves",   po::value<uint>(&options.max_moves)->default_value(1000), "maximum number of moves per game (total) before adjudicating draw regardless of scores")
          ("earlywin",   "adjudicate win result early if both engines report mate scores")
          ("earlydraw",  "adjudicate draw result early if both engine scores are in range (-drawscore <= score <= drawscore) for a total of drawmoves moves")

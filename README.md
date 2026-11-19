@@ -89,6 +89,10 @@ To compile, Boost library must be installed.
   --timeodds2 arg (=1.0)                second engine time odds
   --games arg (=1000000)                total number of games to play
   --threads arg (=1)                    number of concurrent games to run
+  --maxseconds arg (=0)                 stop the match after this many seconds
+                                        (0 = no limit)
+  --stopfile arg (=scm_stop)            stop the match when a file with this
+                                        name appears (default: scm_stop)
   --maxmoves arg (=1000)                maximum number of moves per game
                                         (total) before adjudicating draw
                                         regardless of scores
@@ -148,3 +152,22 @@ scm --resume
 or
 scm --resume <filename>
 ```
+
+The saved file also restores the stop settings described below, so a time-limited match
+continues on its remaining time budget.
+
+## Stopping a match automatically
+
+Use `--maxseconds <seconds>` to end the match after a time limit, or `--stopfile <filename>`
+(default `scm_stop`) to end it when that file appears. Both stop gracefully: no new games are
+started, the match is shut down normally, and autosave, PGN and final statistics are still
+written. Games in progress at that moment are abandoned (just like a keypress stop), so the
+reported game counts only include completed games.
+
+Both settings are stored in the match progress file and restored by `--resume`, so an
+interrupted time-limited match keeps its limit. `--maxseconds` counts total match time,
+including the time already recorded in the progress file; a match whose budget was already
+used up stops again as soon as it is resumed. `scm` never deletes the stop file, so a leftover
+one would stop a resumed match immediately; delete it before resuming if you want the match to
+continue.
+
