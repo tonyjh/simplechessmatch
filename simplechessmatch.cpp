@@ -721,6 +721,20 @@ static string format_rate(double rate)
    return oss.str();
 }
 
+// Sentinel for "no finite Elo difference". A score of exactly 0 or 1 has no
+// finite Elo equivalent, and a confidence interval that runs outside [0, 1] has
+// no finite end point. The output code renders the sentinel as inf / open.
+static const double ELO_INF = 1e9;
+
+static double score_to_elo(double score)
+{
+   if (score <= 1e-9)
+      return -ELO_INF;
+   if (score >= 1.0 - 1e-9)
+      return ELO_INF;
+   return 400.0 * log10(score / (1.0 - score));
+}
+
 void MatchManager::print_compact_results(const string &name1, const string &name2, AggregatedResults &r)
 {
    EloInfo elo_info;
@@ -744,14 +758,18 @@ void MatchManager::print_compact_results(const string &name1, const string &name
    if (m_completed_pairs > 0)
    {
       cs << " elo=" << fixed << setprecision(1);
-      if (elo_info.elo_diff >= 1e9)
+      if (elo_info.elo_diff >= ELO_INF)
          cs << "+inf";
-      else if (elo_info.elo_diff <= -1e9)
+      else if (elo_info.elo_diff <= -ELO_INF)
          cs << "-inf";
       else
          cs << showpos << elo_info.elo_diff << noshowpos;
-      cs << " ci=" << elo_info.elo_margin
-         << " los=" << elo_info.los << "%";
+      cs << " ci=";
+      if (elo_info.elo_margin >= ELO_INF)
+         cs << "inf";
+      else
+         cs << elo_info.elo_margin;
+      cs << " los=" << elo_info.los << "%";
    }
 
    if (m_sprt_enabled)
@@ -906,7 +924,10 @@ void MatchManager::print_final_results(void)
    AggregatedResults r = aggregate_results();
    EloInfo elo_info = calculate_elo();
 
-   double elo_diff = (r.total_games > 0) ? log10(1.0 / r.engine_score[SECOND] - 1.0) * 400.0 : 0.0;
+   // Classical Elo from the per-game score of all completed games, so that it
+   // matches the Score % row below. Uses the same clamped conversion as
+   // calculate_elo() instead of dividing by a score that may be exactly 0.
+   double elo_diff = (r.total_games > 0) ? score_to_elo(r.engine_score[FIRST]) : 0.0;
 
    string name1 = filename_from_path(options.engine_file_name_1);
    string name2 = filename_from_path(options.engine_file_name_2);
@@ -949,7 +970,14 @@ void MatchManager::print_final_results(void)
    cout << "  " << left << setw(lw) << "Penta (0/1/2/3/4)" << right << setw(vw)
         << (to_string(m_penta[0]) + " " + to_string(m_penta[1]) + " " + to_string(m_penta[2])
             + " " + to_string(m_penta[3]) + " " + to_string(m_penta[4])) << "\n";
-   cout << "  " << left << setw(lw) << "Elo (classical)" << right << setw(vw) << showpos << setprecision(2) << elo_diff << noshowpos << "\n";
+   cout << "  " << left << setw(lw) << "Elo (classical)" << right << setw(vw);
+   if (elo_diff >= ELO_INF)
+      cout << "+inf";
+   else if (elo_diff <= -ELO_INF)
+      cout << "-inf";
+   else
+      cout << showpos << setprecision(2) << elo_diff << noshowpos;
+   cout << "\n";
    cout << "  " << left << setw(lw) << "Elo (game pairs, 95% CI)" << right << setw(vw) << elo_info.elo_str << "\n";
    cout << "  " << left << setw(lw) << "Elo (normalized, 95% CI)" << right << setw(vw) << elo_info.nElo_str << "\n";
    cout << "  " << left << setw(lw) << "LOS (likelihood E1 superior)" << right << setw(vw) << elo_info.los_str << "\n";
@@ -1040,95 +1068,142 @@ void MatchManager::print_thread_results(void)
    }
 }
 
+// LOS prior: a uniform Dirichlet distribution over the five possible pair
+// outcomes (one pseudo-count per outcome). This uses the exact posterior mean
+// and variance of the mean pair score, with a normal approximation for the
+// shape. Shrinking the mean toward 0.5 and including the prior uncertainty in
+// the variance avoids the small-sample overconfidence of the plug-in normal
+// approximation.
+static double dirichlet_normal_los(const int penta[5], int pairs)
+{
+   const double alpha0 = 5.0;
+   const double total = alpha0 + pairs;
+
+   double mean = 0.0;
+   double second = 0.0;
+
+   for (int k = 0; k < 5; ++k)
+   {
+      double alpha = alpha0 / 5.0 + penta[k];
+      double value = k * 0.25;
+      mean += value * alpha;
+      second += value * value * alpha;
+   }
+   mean /= total;
+
+   double variance = (second - total * mean * mean) / (total * (total + 1.0));
+
+   if (variance <= 1e-15)
+      return (mean > 0.5) ? 100.0 : ((mean < 0.5) ? 0.0 : 50.0);
+
+   double z = (mean - 0.5) / sqrt(variance);
+   return 50.0 * (1.0 + erf(z / sqrt(2.0)));
+}
+
 EloInfo MatchManager::calculate_elo(void)
 {
+   const int N = m_completed_pairs;
+
+   if (N == 0)
+      return EloInfo();
+
    EloInfo elo_info;
 
-   if (m_completed_pairs == 0) {
-      elo_info.elo_diff = 0.0;
-      elo_info.elo_margin = 0.0;
-      elo_info.nElo_diff = 0.0;
-      elo_info.nElo_margin = 0.0;
-      elo_info.los = 0.0;
-      elo_info.elo_str = "";
-      elo_info.nElo_str = "";
-      elo_info.los_str = "";
-      return elo_info;
-   }
-
-   double p[5] = {0.0};
-   for (int k = 0; k < 5; ++k) p[k] = (double)m_penta[k] / m_completed_pairs;
-
+   // 1. Observed score: mean per-game score of engine 1 over completed pairs.
    double score = 0.0;
-   for (int k = 0; k < 5; ++k) score += p[k] * (k * 0.25);
 
-   double var_pair_avg = 0.0;
+   for (int k = 0; k < 5; ++k)
+      score += (double)m_penta[k] / N * (k * 0.25);
+
+   // 2. Observed variance of the per-pair score (plug-in estimate).
+   //
+   // N * variance is the sum of squared deviations, i.e. the plug-in variance
+   // already carries the (N - 1) / N factor of the sample variance, so no
+   // Bessel correction is applied here: the shrinkage below weights N observed
+   // pairs against PRIOR_WEIGHT hypothetical ones.
+   double variance = 0.0;
+
    for (int k = 0; k < 5; ++k) {
-      double diff = (k * 0.25) - score;
-      var_pair_avg += p[k] * diff * diff;
+      double diff = k * 0.25 - score;
+      variance += ((double)m_penta[k] / N) * diff * diff;
    }
 
-   // Bessel's correction: the sum above is the plug-in variance (denominator N).
-   // Scale it to the unbiased sample variance (denominator N - 1) before using
-   // it for the standard errors. A single pair carries no variance information.
-   if (m_completed_pairs > 1)
-      var_pair_avg *= (double)m_completed_pairs / (double)(m_completed_pairs - 1);
+   // 3. Prior-regularized variance
+   //
+   // A match whose pairs all ended the same way (e.g. a single 2-0 pair) has a
+   // plug-in variance of 0, which would make the standard error 0 and the
+   // confidence interval degenerate. Shrink it towards a uniform prior over the
+   // five possible pair outcomes: Mean = 0.5, variance = 0.125.
+   //
+   // Lambda = 2 hypothetical pairs. 0.125 is the widest plausible per-pair
+   // variance, so the correction is deliberately conservative: it widens the
+   // confidence interval for small matches and is negligible after ~100 pairs.
+   // LOS is computed separately below and does not use this shrinkage.
+   const double PRIOR_WEIGHT = 2.0;
+   const double PRIOR_VARIANCE = 0.125;
 
-   double std_error_of_mean_score = sqrt(var_pair_avg / m_completed_pairs);
+   double adjusted_variance =
+      (N * variance + PRIOR_WEIGHT * PRIOR_VARIANCE) / (N + PRIOR_WEIGHT);
 
-   // Likelihood of Superiority (LOS): the probability that engine 1's true score
-   // exceeds 50%, using the normal approximation with the sample standard error.
-   if (std_error_of_mean_score > 1e-12)
-      elo_info.los = 100.0 * 0.5 * (1.0 + erf((score - 0.5) / (std_error_of_mean_score * sqrt(2.0))));
+   double standard_error = sqrt(adjusted_variance / N);
+
+   // 4. Classical Elo
+   elo_info.elo_diff = score_to_elo(score);
+
+   // 5. LOS: posterior probability that engine 1's true score exceeds 50%.
+   // Uses a uniform Dirichlet prior over the five pair outcomes; the posterior
+   // mean and variance are exact, with a normal approximation for the shape.
+   elo_info.los = dirichlet_normal_los(m_penta, N);
+
+   // 6. Elo confidence interval
+   //
+   // An interval that extends beyond [0, 1] is unbounded in Elo terms, so it is
+   // reported as open instead of being clamped to an arbitrary finite width.
+   double lo = score - 1.96 * standard_error;
+   double hi = score + 1.96 * standard_error;
+
+   if ((lo <= 0.0) || (hi >= 1.0))
+      elo_info.elo_margin = ELO_INF;
    else
-      elo_info.los = (score > 0.5) ? 100.0 : ((score < 0.5) ? 0.0 : 50.0);
+      elo_info.elo_margin = max(fabs(elo_info.elo_diff - score_to_elo(lo)),
+                                fabs(score_to_elo(hi) - elo_info.elo_diff));
 
-   if (score <= 1e-9 || score >= 1.0 - 1e-9) {
-      elo_info.elo_diff = score > 0.5 ? 1e9 : -1e9;
-      elo_info.elo_margin = 0.0;
-      elo_info.nElo_diff = score > 0.5 ? 1e9 : -1e9;
-      elo_info.nElo_margin = 0.0;
-   } else {
-      // 1. Classical / Logistic Elo (Exact bounds calculation)
-      auto to_elo = [](double s) {
-          if (s < 1e-5) s = 1e-5;
-          if (s > 1.0 - 1e-5) s = 1.0 - 1e-5;
-          return -400.0 * log10(1.0 / s - 1.0);
-      };
-      elo_info.elo_diff = to_elo(score);
-      double mu_min = score - 1.96 * std_error_of_mean_score;
-      double mu_max = score + 1.96 * std_error_of_mean_score;
-      elo_info.elo_margin = (to_elo(mu_max) - to_elo(mu_min)) / 2.0;
+   // 7. Normalized Elo
+   //
+   // The regularized variance keeps sigma_pg strictly positive, so the
+   // normalized Elo and its margin stay finite even for a perfect score.
+   const double ELO_PER_LOG10 = 800.0 / log(10.0);
 
-      // 2. Normalized Elo (nElo)
-      double sigma_pg = sqrt(2.0 * var_pair_avg);
-      elo_info.nElo_diff = 0.0;
-      elo_info.nElo_margin = 0.0;
-      if (sigma_pg > 1e-9) {
-         double nt = (score - 0.5) / sigma_pg;
-         elo_info.nElo_diff = nt * (800.0 / log(10.0));
-         double std_err_nt = std_error_of_mean_score / sigma_pg;
-         elo_info.nElo_margin = 1.96 * std_err_nt * (800.0 / log(10.0));
-      }
+   double sigma_pg = sqrt(2.0 * adjusted_variance);
+
+   if (sigma_pg > 1e-9) {
+      double nt = (score - 0.5) / sigma_pg;
+
+      elo_info.nElo_diff = nt * ELO_PER_LOG10;
+
+      double std_err_nt = standard_error / sigma_pg;
+
+      elo_info.nElo_margin = 1.96 * std_err_nt * ELO_PER_LOG10;
    }
 
+   // 8. Formatting
    stringstream ss_elo, ss_nElo, ss_los;
 
    ss_elo << fixed << setprecision(2);
-   if (elo_info.elo_diff >= 1e9)
-      ss_elo << "+inf";
-   else if (elo_info.elo_diff <= -1e9)
-      ss_elo << "-inf";
-   else
-      ss_elo << showpos << elo_info.elo_diff << " +- " << noshowpos << elo_info.elo_margin;
 
-   ss_nElo << fixed << setprecision(2);
-   if (elo_info.nElo_diff >= 1e9)
-      ss_nElo << "+inf";
-   else if (elo_info.nElo_diff <= -1e9)
-      ss_nElo << "-inf";
+   if (elo_info.elo_diff >= ELO_INF)
+      ss_elo << "+inf";
+   else if (elo_info.elo_diff <= -ELO_INF)
+      ss_elo << "-inf";
+   else if (elo_info.elo_margin >= ELO_INF)
+      ss_elo << showpos << elo_info.elo_diff << noshowpos << " (open)";
    else
-      ss_nElo << showpos << elo_info.nElo_diff << " +- " << noshowpos << elo_info.nElo_margin;
+      ss_elo << showpos << elo_info.elo_diff
+             << " +- " << noshowpos << elo_info.elo_margin;
+
+   ss_nElo << fixed << setprecision(2)
+           << showpos << elo_info.nElo_diff
+           << " +- " << noshowpos << elo_info.nElo_margin;
 
    ss_los << fixed << setprecision(2) << elo_info.los << "%";
 

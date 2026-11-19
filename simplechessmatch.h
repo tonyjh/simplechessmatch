@@ -53,7 +53,7 @@ struct EloInfo {
    double elo_margin = 0.0;
    double nElo_diff = 0.0;
    double nElo_margin = 0.0;
-   double los = 0.0; // Likelihood of Superiority (probability E1 is stronger), in percent
+   double los = 0.0; // likelihood of superiority: posterior P(E1's true score > 50%), in percent
    string elo_str;
    string nElo_str;
    string los_str;
