@@ -95,6 +95,10 @@ private:
    bool m_engines_shut_down;
    fstream m_FENs_file;
    fstream m_pgn_file;
+   string m_pgn_pending;   // finished games waiting to be written to m_pgn_file
+   chrono::steady_clock::time_point m_last_pgn_save;
+   bool m_pgn_saved_yet;
+   bool m_pgn_error_reported;
    string m_tc_str;
    string m_stop_reason;
    chrono::steady_clock::time_point m_last_stopfile_check;
@@ -153,7 +157,7 @@ public:
    void print_thread_results(void);
    void print_extended_results(AggregatedResults &r);
    void print_compact_results(const string &name1, const string &name2, AggregatedResults &r);
-   void save_pgn(void);
+   void save_pgn(bool force = false);
    void shut_down_all_engines(void);
    void save_match_progress(void);
 
@@ -165,6 +169,7 @@ private:
    uint num_games_in_progress(void);
    int get_next_fen(string &fen);
    void join_finished_threads(void);
+   void collect_pgn(void);
    bool line_output_mode(void);
    int estimate_eta_s(AggregatedResults &r);
 

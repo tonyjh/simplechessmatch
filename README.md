@@ -124,6 +124,11 @@ To compile, Boost library must be installed.
                                         (if file exists it will be overwritten)
   --pgnclocks                           write clock comments ({[%clk
                                         H:MM:SS.d]}) into PGN and PGN4 output
+  --pgnflush arg (=30)                  interval in seconds between PGN/PGN4
+                                        saves to disk. Finished games are
+                                        buffered in memory and written
+                                        together; an 8 MB buffer forces an
+                                        early save.
   --compact                             compact single-line status output with
                                         detailed match statistics
   --sprt                                Enable SPRT test. Test stops when
@@ -144,6 +149,10 @@ The save happens once every N game pairs.
 Incomplete game pairs that were in progress (before interruption/resume) are discarded and will be replayed.
 If PGN/PGN4 saving is enabled, the PGN may contain duplicate games from replayed pairs.
 If the process is terminated abruptly, games completed after the last autosave/checkpoint may also be missing from the PGN.
+
+PGN/PGN4 output is buffered and written every `--pgnflush` seconds (default 30;
+an 8 MB buffer forces an early save). Normal shutdown always flushes pending games,
+and every autosave checkpoint is preceded by a PGN save.
 
 If the match is interrupted (manually or due to power loss, etc.), resume it with:
 

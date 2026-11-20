@@ -21,6 +21,9 @@ static string resume_filename;
 // Use --fixed to choose a different cap.
 static constexpr uint DEPTH_DEFAULT_FIXED_MS = 10 * 60 * 1000; // 10 minutes
 
+// Maximum PGN buffer size allowed before forcing save.
+static constexpr size_t PGN_PENDING_MAX_BYTES = 8 * 1024 * 1024; // 8 MB
+
 int main(int argc, char* argv[])
 {
    cout << "simplechessmatch\n";
@@ -85,12 +88,12 @@ int main(int argc, char* argv[])
 
    match_mgr.main_loop();
 
-   if (options.autosave)
-      match_mgr.save_match_progress();
    match_mgr.shut_down_all_engines();
    match_mgr.print_thread_results();
    match_mgr.print_final_results();
-   match_mgr.save_pgn();
+   match_mgr.save_pgn(true);
+   if (options.autosave)
+      match_mgr.save_match_progress();
 
    match_mgr.cleanup();
 
@@ -124,6 +127,9 @@ MatchManager::MatchManager(void)
    m_sprt_beta = 0.0;
    m_sprt_decision = SPRT_NONE;
    m_lines_printed = 0;
+
+   m_pgn_saved_yet = false;
+   m_pgn_error_reported = false;
 }
 
 MatchManager::~MatchManager(void)
@@ -240,6 +246,10 @@ void MatchManager::join_finished_threads(void)
          add_pair_score(pid);
       }
    }
+
+   // Collect any available PGNs now, before any finished game threads are assigned new games to run.
+   collect_pgn();
+
    update_penta_stats();
 }
 
@@ -1242,18 +1252,46 @@ int MatchManager::get_next_fen(string &fen)
    return 1;
 }
 
-void MatchManager::save_pgn(void)
+void MatchManager::save_pgn(bool force)
+{
+   if (!m_pgn_file.is_open())
+      return;
+
+   // Ensure all finished games are collected.
+   collect_pgn();
+
+   if (m_pgn_pending.empty())
+      return;
+
+   auto now = chrono::steady_clock::now();
+   if (!force && m_pgn_saved_yet && (options.pgn_flush_interval_s > 0) &&
+       (m_pgn_pending.size() < PGN_PENDING_MAX_BYTES) &&
+       ((now - m_last_pgn_save) < chrono::seconds(options.pgn_flush_interval_s)))
+      return;
+
+   m_pgn_file << m_pgn_pending;
+   m_pgn_file.flush();
+   if (m_pgn_file.fail() && !m_pgn_error_reported)
+   {
+      cout << "Warning: error writing PGN file\n";
+      m_pgn_error_reported = true;
+   }
+   m_pgn_pending.clear();
+   m_pgn_saved_yet = true;
+   m_last_pgn_save = now;
+}
+
+// Move PGN text from finished games into m_pgn_pending and clear the flags.
+// A running game's m_pgn_valid is always false.
+void MatchManager::collect_pgn(void)
 {
    if (!m_pgn_file.is_open())
       return;
 
    for (uint i = 0; i < options.num_threads; i++)
    {
-      if (m_game_mgr[i].m_pgn_valid.load(memory_order_acquire))
-      {
-         m_game_mgr[i].m_pgn_valid = false;
-         m_pgn_file << m_game_mgr[i].m_pgn;
-      }
+      if (m_game_mgr[i].m_pgn_valid.exchange(false, memory_order_acq_rel))
+         m_pgn_pending += m_game_mgr[i].m_pgn;
    }
 }
 
@@ -1298,7 +1336,12 @@ void MatchManager::add_pair_score(uint pid)
    m_completed_pairs++;
 
    if (options.autosave && ((m_completed_pairs % options.autosave) == 0))
+   {
+      // Write any pending PGN first so the checkpoint never records pairs whose
+      // games are still only in memory (they would be lost on a crash + resume).
+      save_pgn(true);
       save_match_progress();
+   }
 }
 
 void MatchManager::update_penta_stats(void)
@@ -1490,6 +1533,7 @@ int MatchManager::read_restore_data(const string &filename, options_info &saved_
    saved_opts.variant              = o.get<string>("variant", "");
    saved_opts.pgn_filename         = o.get<string>("pgn_filename", "");
    saved_opts.pgn4_filename        = o.get<string>("pgn4_filename", "");
+   saved_opts.pgn_flush_interval_s = o.get<uint>("pgn_flush_interval_s", 30);
    saved_opts.autosave             = o.get<uint>("autosave", 0);
    saved_opts.autosave_filename    = o.get<string>("autosave_filename", "matchprogress.json");
    saved_opts.sprt_enabled         = get_bool("sprt_enabled", false);
@@ -1748,6 +1792,7 @@ void output_options(ostringstream &oss)
    oss << "      \"variant\": \"" << options.variant << "\",\n"; // json_escape not needed, since variant names don't have special characters.
    oss << "      \"pgn_filename\": \"" << json_escape(options.pgn_filename) << "\",\n";
    oss << "      \"pgn4_filename\": \"" << json_escape(options.pgn4_filename) << "\",\n";
+   oss << "      \"pgn_flush_interval_s\": " << options.pgn_flush_interval_s << ",\n";
    oss << "      \"autosave\": " << options.autosave << ",\n";
    oss << "      \"autosave_filename\": \"" << json_escape(options.autosave_filename) << "\",\n";
    oss << "      \"sprt_enabled\": " << (options.sprt_enabled ? "true" : "false") << ",\n";
@@ -1847,6 +1892,7 @@ int parse_cmd_line_options(int argc, char* argv[])
          ("pgn",        po::value<string>(&options.pgn_filename), "save games in PGN format to specified file name\n(if file exists it will be overwritten)")
          ("pgn4",       po::value<string>(&options.pgn4_filename), "save games in PGN4 format to specified file name\n(if file exists it will be overwritten)")
          ("pgnclocks",  "write clock comments ({[%clk H:MM:SS.d]}) into PGN and PGN4 output")
+         ("pgnflush",   po::value<uint>(&options.pgn_flush_interval_s)->default_value(30), "interval in seconds between PGN/PGN4 saves to disk. Finished games are buffered in memory and written together; an 8 MB buffer forces an early save.")
          ("compact",    "compact single-line status output with detailed match statistics")
          ("sprt",       "Enable SPRT test. Test stops when bounds are reached.")
          ("sprt-elo-model", po::value<string>(&options.sprt_elo_model)->default_value("normalized"), "SPRT Elo model ('normalized' or 'logistic')")

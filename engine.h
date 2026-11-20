@@ -203,6 +203,7 @@ struct options_info
    string variant;
    string pgn_filename;
    string pgn4_filename;
+   uint pgn_flush_interval_s = 30; // seconds between PGN/PGN4 saves (0 = save every tick)
    uint autosave;
    string autosave_filename;
 
