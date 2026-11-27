@@ -1,6 +1,7 @@
 #include "simplechessmatch.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
+#include <boost/crc.hpp>
 #include <filesystem>
 
 namespace po = boost::program_options;
@@ -11,6 +12,29 @@ struct comma_numpunct : std::numpunct<char>
    char do_thousands_sep() const override { return ','; }
    string do_grouping() const override { return "\3"; }
 };
+
+// Returns the CRC-32 (IEEE 802.3) of a file as 8 lowercase hex digits, or "n/a"
+// if the file cannot be read.
+static string file_crc32_hex(const string &path)
+{
+   ifstream file(path, ios::binary);
+   if (!file.is_open())
+      return "n/a";
+
+   boost::crc_32_type crc;
+   char buf[64 * 1024];
+   while (file)
+   {
+      file.read(buf, sizeof(buf));
+      streamsize n = file.gcount();
+      if (n > 0)
+         crc.process_bytes(buf, (size_t)n);
+   }
+
+   ostringstream oss;
+   oss << hex << uppercase << setfill('0') << setw(8) << crc.checksum();
+   return oss.str();
+}
 
 struct options_info options;
 MatchManager match_mgr;
@@ -68,6 +92,11 @@ int main(int argc, char* argv[])
    }
 
    cout << "loading engines...\n";
+
+   cout << "E1: " << options.engine_file_name_1 << " [CRC32="
+        << file_crc32_hex(options.engine_file_name_1) << "]\n";
+   cout << "E2: " << options.engine_file_name_2 << " [CRC32="
+        << file_crc32_hex(options.engine_file_name_2) << "]\n";
 
    if (match_mgr.load_all_engines() == 0)
    {
@@ -961,9 +990,9 @@ void MatchManager::print_final_results(void)
    cout << "\n";
    cout << "MATCH INFO\n\n";
    cout << "E1:                      " << left << setw(name_width) << name1 << "[Hash=" << options.mem_size_1 << "MB, Threads="
-                                       << options.num_cores_1 << odds1 << "]\n";
+                                       << options.num_cores_1 << ", CRC32=" << file_crc32_hex(options.engine_file_name_1) << odds1 << "]\n";
    cout << "E2:                      " << left << setw(name_width) << name2 << "[Hash=" << options.mem_size_2 << "MB, Threads="
-                                       << options.num_cores_2 << odds2 << "]\n";
+                                       << options.num_cores_2 << ", CRC32=" << file_crc32_hex(options.engine_file_name_2) << odds2 << "]\n";
    cout << "Time Control:            " << m_tc_str << "\n";
    cout << "Completed Games:         " << r.total_games << " / " << options.num_games_to_play << "\n";
    cout << "Completed Game Pairs:    " << m_completed_pairs << " / " << options.num_games_to_play / 2 << "\n";
